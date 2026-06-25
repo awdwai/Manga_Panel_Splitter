@@ -11,7 +11,7 @@ The production deep-learning backends are **partial** because they require exter
 | Module | Status | Notes |
 |---|---|---|
 | `MangaAnimatorPrep/main.py` | Working | CLI supports `process`, `benchmark`, `system-info`, and `gui`. |
-| `MangaAnimatorPrep/gui.py` | Working | Tkinter GUI launches on systems with Tkinter/display. `--smoke-test` verifies launch safety. |
+| `MangaAnimatorPrep/gui.py` | Working | PySide6 GUI provides dockable panels, dark theme, image viewer, project explorer, properties, processing console, progress bar, and settings dialog. |
 | `MangaAnimatorPrep/config.py` | Working | Environment overrides and validated nested JSON loading work. |
 | `MangaAnimatorPrep/pipeline.py` | Working | End-to-end orchestration, reports, debug exports, and batch image processing work. |
 | `detectors/panel_detector.py` | Working | Detects synthetic rectangular panels and falls back to full image when none are found. |

@@ -35,7 +35,9 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--debug", action="store_true", help="Write debug visualizations.")
 
     gui = subparsers.add_parser("gui", help="Launch the desktop GUI.")
-    gui.add_argument("--smoke-test", action="store_true", help="Validate GUI import/window creation without entering mainloop.")
+    gui.add_argument("--smoke-test", action="store_true", help="Validate PySide6 GUI launch without entering mainloop.")
+    gui.add_argument("--smoke-input", type=Path, default=None, help="Optional image/folder to load during GUI smoke test.")
+    gui.add_argument("--smoke-output", type=Path, default=None, help="Optional output folder to process during GUI smoke test.")
 
     subparsers.add_parser("system-info", help="Print runtime GPU/ONNX/PyTorch capability information.")
     return parser
@@ -77,9 +79,9 @@ def main(argv: list[str] | None = None) -> int:
         from MangaAnimatorPrep.gui import gui_smoke_test, launch_gui
 
         if args.smoke_test:
-            result = gui_smoke_test()
+            result = gui_smoke_test(args.smoke_input, args.smoke_output)
             CONSOLE.print(result)
-            return 0 if result["status"] in {"working", "headless"} else 1
+            return 0 if result["status"] == "working" else 1
         launch_gui(args.config)
         return 0
 

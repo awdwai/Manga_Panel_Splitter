@@ -23,7 +23,7 @@ These items are not blockers for the currently working fallback pipeline, but th
 ## Environment limitations found during QA
 
 - This cloud environment has no visible NVIDIA GPU; CUDA code paths are present but could not be exercised here.
-- Tkinter was missing initially on Ubuntu and required `sudo apt-get install python3-tk`.
+- GUI stack has been migrated to PySide6; headless CI/cloud verification should set `QT_QPA_PLATFORM=offscreen`.
 - MediaPipe is not in `requirements.txt`; pose falls back to geometry unless users install MediaPipe separately.
 
 ## Next highest-value improvements

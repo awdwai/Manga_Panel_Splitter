@@ -3,7 +3,7 @@
 Audit date: 2026-06-25
 
 This audit evaluates the actual implementation in the repository, not the intended architecture.
-The current project has a runnable OpenCV/Tkinter-based pipeline, but most named deep-learning
+The current project has a runnable OpenCV/PySide6-based pipeline, but most named deep-learning
 models are optional hooks or fallbacks rather than installed, exercised production integrations.
 
 ## Installed backend reality check
@@ -33,14 +33,14 @@ mediapipe: missing
 groundingdino: missing
 sam2: missing
 saicinpainting: missing
-PySide6: missing
-tkinter: installed
+PySide6: installed after GUI migration
+tkinter: no longer used by the application GUI
 torch.cuda.is_available(): False
 torch.version.cuda: 13.0
 ```
 
 `requirements.txt` contains `torch`, `torchvision`, and `onnxruntime-gpu`, but does **not** contain
-MediaPipe, GroundingDINO, SAM2, LaMa/saicinpainting, OpenPose, Stable Diffusion/diffusers, or PySide6.
+MediaPipe, GroundingDINO, SAM2, LaMa/saicinpainting, OpenPose, or Stable Diffusion/diffusers.
 
 ## Module classification
 
@@ -56,7 +56,7 @@ MediaPipe, GroundingDINO, SAM2, LaMa/saicinpainting, OpenPose, Stable Diffusion/
 | Body-part splitting | **PARTIAL** | `segmentation/body_part_splitter.py` does create separate named masks for head, hair, torso, arms, hands, legs, and feet. However, `_geometric_regions` defines fixed rectangular regions over the character bbox and intersects them with the character mask. This is limb separation by geometry, not semantic body-part segmentation. |
 | Inpainting / background reconstruction | **PARTIAL** | `inpainting/lama_inpainter.py` attempts a LaMa adapter only if configured, but `saicinpainting` is not installed. The actual working reconstruction is OpenCV `cv2.inpaint` using Telea and Navier-Stokes. This is real classical inpainting, not LaMa or Stable Diffusion. |
 | Export system | **WORKING** | `exporters/layer_exporter.py` writes panel images, background images, speech/text/effects folders, character alpha PNGs, body-part PNGs, and debug overlays. `exporters/rig_exporter.py` writes rig JSON with hierarchy, bboxes, pivots, and confidence. |
-| GUI | **PARTIAL** | GUI exists and launches through Tkinter in `gui.py`. It is not PySide6. It provides input/output selection, process/benchmark buttons, and system info, but it is a basic wrapper around the pipeline rather than a full production desktop application. |
+| GUI | **PARTIAL** | GUI exists in `gui.py` and uses PySide6. It includes dockable panels, dark theme, image viewer, project explorer, properties panel, processing console, progress bar, and settings dialog. It remains partial because it is still a wrapper around the heuristic pipeline rather than a full production editing application. |
 | CUDA / GPU acceleration | **PARTIAL / NOT USED HERE** | `utils/gpu.py` detects CUDA with `torch.cuda.is_available()` and sets runtime metadata. In this environment, `torch.cuda.is_available()` is false, so runtime device is CPU. No real inference model is loaded on CUDA. ONNX Runtime CUDA provider is present, but no ONNX model inference is used. |
 | Model caching | **WORKING FOR HOOKS** | `utils/model_cache.py` caches loaded optional backends. In practice, only the failed/None MediaPipe loader is cached in this environment; heavy models are not installed. |
 | Benchmarking | **WORKING** | `utils/performance.py` records stage timings, CPU samples, VRAM samples, model load timings, and writes JSON/Markdown reports. VRAM remains 0 MB here because CUDA is not available/used. |
@@ -142,15 +142,15 @@ Classification: **NOT USED**.
 
 ### 7. Is the GUI PySide6 or Tkinter?
 
-**Tkinter.**
+**PySide6 after the GUI migration.**
 
 Evidence:
 
-- `MangaAnimatorPrep/gui.py` imports `tkinter as tk` and creates `tk.Tk()`.
-- Installed package check reports `PySide6: missing`.
-- `requirements.txt` does not list PySide6.
+- `MangaAnimatorPrep/gui.py` imports `from PySide6 import QtCore, QtGui, QtWidgets`.
+- `requirements.txt` lists `PySide6`.
+- The CLI smoke test exercises `python3 -m MangaAnimatorPrep.main gui --smoke-test`.
 
-Classification: **Tkinter GUI, not PySide6**.
+Classification: **PySide6 GUI, PARTIAL production UX**.
 
 ### 8. Are body parts actually separated into limbs?
 

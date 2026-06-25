@@ -3,6 +3,7 @@ opencv-python-headless
 pillow
 pydantic
 rich
+PySide6
 tqdm
 psutil
 onnxruntime-gpu

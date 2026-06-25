@@ -42,13 +42,21 @@ python3 -m MangaAnimatorPrep.main process <input-file-or-directory> --output out
 python3 -m MangaAnimatorPrep.main benchmark <input-file-or-directory> --output output
 python3 -m MangaAnimatorPrep.main gui
 python3 -m MangaAnimatorPrep.main gui --smoke-test
+python3 -m MangaAnimatorPrep.main gui --smoke-test --smoke-input sample_data/sample_page.png --smoke-output gui_smoke_output
 python3 -m MangaAnimatorPrep.main system-info
 ```
 
-Linux environments may need the OS Tkinter package before launching the desktop GUI:
+The desktop GUI is implemented with PySide6. In headless CI/cloud environments, use Qt's
+offscreen platform for smoke tests:
 
 ```bash
-sudo apt-get install python3-tk
+QT_QPA_PLATFORM=offscreen python3 -m MangaAnimatorPrep.main gui --smoke-test
+```
+
+Linux systems may also need Qt's EGL runtime library:
+
+```bash
+sudo apt-get install libegl1
 ```
 
 ## Output structure
