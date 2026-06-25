@@ -48,3 +48,19 @@ def test_gui_detection_controls_preview_and_approval(tmp_path: Path) -> None:
     window.close()
     app.processEvents()
 
+
+def test_gui_interactive_segmentation_layer_tree(tmp_path: Path) -> None:
+    app = _ensure_app()
+    sample = tmp_path / "sample.png"
+    create_sample(sample)
+    window = MangaAnimatorPrepMainWindow()
+    assert window.load_image_path(sample) is True
+    assert window.segmentation_session is not None
+    window.segmentation_session.new_layer_from_click(100, 100)
+    window._refresh_segmentation_overlays()
+    window._refresh_layer_tree()
+    assert window.layer_tree.topLevelItemCount() == 1
+    assert window.segmentation_overlay_items
+    window.close()
+    app.processEvents()
+

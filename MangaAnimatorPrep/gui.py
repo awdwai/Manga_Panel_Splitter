@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 from MangaAnimatorPrep.config import load_config
+from MangaAnimatorPrep.interactive_segmentation import InteractiveSegmentationSession
 from MangaAnimatorPrep.pipeline import MangaAnimatorPipeline
 from MangaAnimatorPrep.types import BoundingBox, Detection
 from MangaAnimatorPrep.workflow import DetectionSession, DetectionWorkflow, PanelDraft
@@ -125,8 +126,12 @@ class MangaAnimatorPrepMainWindow:
         self.detection_session: DetectionSession | None = None
         self.detections_approved = False
         self.overlay_items: list[Any] = []
+        self.segmentation_overlay_items: list[Any] = []
         self.panel_expected_character_controls: dict[str, Any] = {}
         self.brush_correction_enabled = False
+        self.segmentation_session: InteractiveSegmentationSession | None = None
+        self.interactive_segmentation_enabled = False
+        self._brush_erase = False
 
         self.window = QtWidgets.QMainWindow()
         self.window.setWindowTitle("MangaAnimatorPrep")
@@ -142,6 +147,8 @@ class MangaAnimatorPrepMainWindow:
         self._build_docks()
         self._build_status_bar()
         self._log("PySide6 GUI ready.")
+        self._original_viewport_mouse_press = self.image_view.viewport().mousePressEvent
+        self.image_view.viewport().mousePressEvent = self._image_mouse_press_event  # type: ignore[method-assign]
 
     def show(self) -> None:
         self.window.show()
@@ -159,9 +166,12 @@ class MangaAnimatorPrepMainWindow:
             return False
         self.input_path = path
         first_image = images[0]
+        self.current_image_array = load_image(first_image)
+        self.segmentation_session = InteractiveSegmentationSession(self.current_image_array)
+        self.detections_approved = False
         pixmap = self.QtGui.QPixmap(str(first_image))
         if pixmap.isNull():
-            array = load_image(first_image)
+            array = self.current_image_array
             height, width = array.shape[:2]
             image = self.QtGui.QImage(array.data, width, height, 3 * width, self.QtGui.QImage.Format_RGB888).copy()
             pixmap = self.QtGui.QPixmap.fromImage(image)
@@ -174,6 +184,7 @@ class MangaAnimatorPrepMainWindow:
         self._set_property("First image", str(first_image))
         self._set_property("Image count", str(len(images)))
         self._log(f"Loaded {first_image}")
+        self._refresh_layer_tree()
         return True
 
     def run_processing_blocking(self, input_path: Path, output_path: Path, benchmark: bool = False) -> int:
@@ -249,6 +260,7 @@ class MangaAnimatorPrepMainWindow:
 
     def _build_docks(self) -> None:
         self._build_detection_controls()
+        self._build_interactive_segmentation_controls()
 
         self.project_tree = self.QtWidgets.QTreeWidget()
         self.project_tree.setHeaderLabels(["Project Explorer"])
@@ -262,6 +274,78 @@ class MangaAnimatorPrepMainWindow:
         self.console = self.QtWidgets.QPlainTextEdit()
         self.console.setReadOnly(True)
         self._add_dock("Processing Console", self.console, self.QtCore.Qt.BottomDockWidgetArea)
+
+    def _build_interactive_segmentation_controls(self) -> None:
+        panel = self.QtWidgets.QWidget()
+        layout = self.QtWidgets.QVBoxLayout(panel)
+
+        self.interactive_segmentation_checkbox = self.QtWidgets.QCheckBox("Enable Click-to-Segment")
+        self.interactive_segmentation_checkbox.toggled.connect(self._toggle_interactive_segmentation)
+        self.layer_label_edit = self.QtWidgets.QLineEdit()
+        self.layer_label_edit.setPlaceholderText("Layer label")
+        self.layer_label_edit.editingFinished.connect(self._rename_active_layer)
+
+        button_row = self.QtWidgets.QHBoxLayout()
+        new_button = self.QtWidgets.QPushButton("New Object")
+        new_button.clicked.connect(self._new_segmentation_object)
+        duplicate_button = self.QtWidgets.QPushButton("Duplicate")
+        duplicate_button.clicked.connect(self._duplicate_active_layer)
+        delete_button = self.QtWidgets.QPushButton("Delete")
+        delete_button.clicked.connect(self._delete_active_layer)
+        merge_button = self.QtWidgets.QPushButton("Merge Selected")
+        merge_button.clicked.connect(self._merge_selected_layers)
+        for button in [new_button, duplicate_button, delete_button, merge_button]:
+            button_row.addWidget(button)
+
+        tool_group = self.QtWidgets.QGroupBox("Mask Editing Tools")
+        tool_layout = self.QtWidgets.QGridLayout(tool_group)
+        self.brush_size_spin = self.QtWidgets.QSpinBox()
+        self.brush_size_spin.setRange(1, 128)
+        self.brush_size_spin.setValue(16)
+        tools = [
+            ("Brush", lambda: self._set_brush_mode(False)),
+            ("Erase", lambda: self._set_brush_mode(True)),
+            ("Polygon Lasso", lambda: self._log("Polygon lasso: click support is scaffolded; use mask actions for now.")),
+            ("Rectangle Select", self._rectangle_select_active),
+            ("Magic Wand", lambda: self._log("Magic wand: click on image while Click-to-Segment is enabled.")),
+            ("Flood Fill", lambda: self._log("Flood fill uses click prompts in Click-to-Segment mode.")),
+            ("Smooth Mask", self._smooth_active_layer),
+            ("Expand Mask", self._expand_active_layer),
+            ("Contract Mask", self._contract_active_layer),
+            ("Fill Holes", self._fill_holes_active_layer),
+            ("Feather Edges", self._feather_active_layer),
+        ]
+        tool_layout.addWidget(self.QtWidgets.QLabel("Brush Size"), 0, 0)
+        tool_layout.addWidget(self.brush_size_spin, 0, 1)
+        for index, (label, handler) in enumerate(tools, start=1):
+            button = self.QtWidgets.QPushButton(label)
+            button.clicked.connect(handler)
+            tool_layout.addWidget(button, index // 2, index % 2)
+
+        self.layer_tree = self.QtWidgets.QTreeWidget()
+        self.layer_tree.setHeaderLabels(["Animation Layer Editor"])
+        self.layer_tree.setDragDropMode(self.QtWidgets.QAbstractItemView.InternalMove)
+        self.layer_tree.itemChanged.connect(self._layer_tree_item_changed)
+        self.layer_tree.itemSelectionChanged.connect(self._layer_tree_selection_changed)
+
+        self.pivot_tree = self.QtWidgets.QTreeWidget()
+        self.pivot_tree.setHeaderLabels(["Pivot", "X", "Y"])
+
+        preview_group = self.QtWidgets.QGroupBox("Live Animation Preview")
+        preview_layout = self.QtWidgets.QGridLayout(preview_group)
+        for index, label in enumerate(["Rotate Head", "Rotate Arm", "Rotate Hand", "Rotate Leg", "Translate Layers", "Scale Layers"]):
+            button = self.QtWidgets.QPushButton(label)
+            button.clicked.connect(lambda _checked=False, text=label: self._log(f"Preview action: {text}"))
+            preview_layout.addWidget(button, index // 2, index % 2)
+
+        layout.addWidget(self.interactive_segmentation_checkbox)
+        layout.addWidget(self.layer_label_edit)
+        layout.addLayout(button_row)
+        layout.addWidget(tool_group)
+        layout.addWidget(self.layer_tree)
+        layout.addWidget(self.pivot_tree)
+        layout.addWidget(preview_group)
+        self._add_dock("Interactive AI Segmentation", panel, self.QtCore.Qt.RightDockWidgetArea)
 
     def _build_detection_controls(self) -> None:
         panel = self.QtWidgets.QWidget()
@@ -643,6 +727,210 @@ class MangaAnimatorPrepMainWindow:
             if item in self.overlay_items:
                 self.overlay_items.remove(item)
         self._log(f"Deleted {len(selected)} selected {item_type} overlay(s).")
+
+    def _toggle_interactive_segmentation(self, enabled: bool) -> None:
+        self.interactive_segmentation_enabled = enabled
+        self._log("Click-to-segment enabled. Left click adds positive prompts; right click adds negative prompts." if enabled else "Click-to-segment disabled.")
+
+    def _image_mouse_press_event(self, event: Any) -> None:
+        if not self.interactive_segmentation_enabled or self.segmentation_session is None:
+            self._original_viewport_mouse_press(event)
+            return
+        scene_point = self.image_view.mapToScene(event.position().toPoint())
+        x, y = int(scene_point.x()), int(scene_point.y())
+        if self.brush_correction_enabled and self.segmentation_session.active_layer is not None:
+            erase = event.button() == self.QtCore.Qt.RightButton or self._brush_erase
+            self.segmentation_session.brush(x, y, self.brush_size_spin.value(), erase=erase)
+            self._refresh_segmentation_overlays()
+            self._refresh_layer_tree()
+            self._refresh_pivot_tree()
+            self._log(("Erased" if erase else "Painted") + f" mask at ({x}, {y}).")
+            return
+        if event.button() == self.QtCore.Qt.LeftButton:
+            layer = self.segmentation_session.add_prompt(x, y, positive=True)
+            self._log(f"Positive prompt at ({x}, {y}) -> {layer.label} ({layer.confidence:.2f})")
+        elif event.button() == self.QtCore.Qt.RightButton:
+            layer = self.segmentation_session.add_prompt(x, y, positive=False)
+            self._log(f"Negative prompt at ({x}, {y}) refined {layer.label}")
+        else:
+            self._original_viewport_mouse_press(event)
+            return
+        self.layer_label_edit.setText(layer.label)
+        self._refresh_segmentation_overlays()
+        self._refresh_layer_tree()
+        self._refresh_pivot_tree()
+
+    def _new_segmentation_object(self) -> None:
+        if self.segmentation_session is None:
+            self._log("Load an image before creating segmentation layers.")
+            return
+        self.segmentation_session.active_layer_id = None
+        self._log("New object mode: left click the object to segment.")
+
+    def _rename_active_layer(self) -> None:
+        if self.segmentation_session is None:
+            return
+        label = self.layer_label_edit.text().strip()
+        if label:
+            self.segmentation_session.rename_active(label)
+            self._refresh_layer_tree()
+
+    def _duplicate_active_layer(self) -> None:
+        if self.segmentation_session is None:
+            return
+        if self.segmentation_session.duplicate_active() is not None:
+            self._refresh_layer_tree()
+            self._refresh_segmentation_overlays()
+            self._refresh_pivot_tree()
+
+    def _delete_active_layer(self) -> None:
+        if self.segmentation_session is None:
+            return
+        self.segmentation_session.delete_active()
+        self._refresh_layer_tree()
+        self._refresh_segmentation_overlays()
+        self._refresh_pivot_tree()
+
+    def _merge_selected_layers(self) -> None:
+        if self.segmentation_session is None:
+            return
+        layer_ids = []
+        for item in self.layer_tree.selectedItems():
+            layer_id = item.data(0, self.QtCore.Qt.UserRole)
+            if layer_id:
+                layer_ids.append(layer_id)
+        if self.segmentation_session.merge_layers(layer_ids, "Merged Layer") is not None:
+            self._refresh_layer_tree()
+            self._refresh_segmentation_overlays()
+            self._refresh_pivot_tree()
+
+    def _layer_tree_selection_changed(self) -> None:
+        if self.segmentation_session is None:
+            return
+        selected = self.layer_tree.selectedItems()
+        if not selected:
+            return
+        layer_id = selected[0].data(0, self.QtCore.Qt.UserRole)
+        if layer_id:
+            self.segmentation_session.active_layer_id = layer_id
+            layer = self.segmentation_session.active_layer
+            if layer:
+                self.layer_label_edit.setText(layer.label)
+                self._refresh_pivot_tree()
+
+    def _layer_tree_item_changed(self, item: Any, column: int) -> None:
+        if self.segmentation_session is None or column != 0:
+            return
+        layer_id = item.data(0, self.QtCore.Qt.UserRole)
+        if not layer_id:
+            return
+        layer = next((entry for entry in self.segmentation_session.layers if entry.layer_id == layer_id), None)
+        if layer is None:
+            return
+        layer.label = item.text(0)
+        layer.visible = item.checkState(0) == self.QtCore.Qt.Checked
+        self._refresh_segmentation_overlays()
+
+    def _set_brush_mode(self, erase: bool) -> None:
+        self.interactive_segmentation_enabled = True
+        self.interactive_segmentation_checkbox.setChecked(True)
+        self.brush_correction_enabled = True
+        self._log("Erase brush active." if erase else "Brush add mode active.")
+        self._brush_erase = erase
+
+    def _rectangle_select_active(self) -> None:
+        if self.segmentation_session is None or self.segmentation_session.active_layer is None:
+            return
+        rect = self.image_scene.sceneRect()
+        bbox = BoundingBox(int(rect.width() * 0.25), int(rect.height() * 0.25), int(rect.width() * 0.5), int(rect.height() * 0.5))
+        self.segmentation_session.rectangle_select(bbox, add=True)
+        self._refresh_segmentation_overlays()
+        self._refresh_layer_tree()
+
+    def _smooth_active_layer(self) -> None:
+        if self.segmentation_session:
+            self.segmentation_session.smooth_active()
+            self._refresh_segmentation_overlays()
+
+    def _expand_active_layer(self) -> None:
+        if self.segmentation_session:
+            self.segmentation_session.expand_active(3)
+            self._refresh_segmentation_overlays()
+
+    def _contract_active_layer(self) -> None:
+        if self.segmentation_session:
+            self.segmentation_session.contract_active(3)
+            self._refresh_segmentation_overlays()
+
+    def _fill_holes_active_layer(self) -> None:
+        if self.segmentation_session:
+            self.segmentation_session.fill_holes_active()
+            self._refresh_segmentation_overlays()
+
+    def _feather_active_layer(self) -> None:
+        if self.segmentation_session:
+            self.segmentation_session.feather_active(3)
+            self._refresh_segmentation_overlays()
+
+    def _refresh_segmentation_overlays(self) -> None:
+        for item in self.segmentation_overlay_items:
+            self.image_scene.removeItem(item)
+        self.segmentation_overlay_items.clear()
+        if self.segmentation_session is None:
+            return
+        colors = [
+            self.QtGui.QColor(46, 204, 113, 90),
+            self.QtGui.QColor(155, 89, 182, 90),
+            self.QtGui.QColor(231, 76, 60, 90),
+            self.QtGui.QColor(241, 196, 15, 90),
+            self.QtGui.QColor(52, 152, 219, 90),
+        ]
+        for index, layer in enumerate(self.segmentation_session.layers):
+            if not layer.visible:
+                continue
+            before_count = len(self.overlay_items)
+            self._add_mask_overlay(layer.mask, 0, 0, colors[index % len(colors)])
+            new_items = self.overlay_items[before_count:]
+            for item in new_items:
+                item.setZValue(5 + index)
+                self.segmentation_overlay_items.append(item)
+            self.overlay_items = self.overlay_items[:before_count]
+
+    def _refresh_layer_tree(self) -> None:
+        if not hasattr(self, "layer_tree"):
+            return
+        self.layer_tree.blockSignals(True)
+        self.layer_tree.clear()
+        panel_item = self.QtWidgets.QTreeWidgetItem(["Panel 1"])
+        panel_item.setFlags(panel_item.flags() | self.QtCore.Qt.ItemIsDropEnabled)
+        self.layer_tree.addTopLevelItem(panel_item)
+        if self.segmentation_session is not None:
+            character_roots: dict[str, Any] = {}
+            for layer in self.segmentation_session.layers:
+                parent_label = "Speech Bubbles" if layer.label == "Speech Bubble" else "Background" if layer.label == "Background" else "Character 1"
+                if parent_label not in character_roots:
+                    root = self.QtWidgets.QTreeWidgetItem([parent_label])
+                    root.setFlags(root.flags() | self.QtCore.Qt.ItemIsDropEnabled)
+                    panel_item.addChild(root)
+                    character_roots[parent_label] = root
+                item = self.QtWidgets.QTreeWidgetItem([layer.label])
+                item.setData(0, self.QtCore.Qt.UserRole, layer.layer_id)
+                item.setFlags(item.flags() | self.QtCore.Qt.ItemIsEditable | self.QtCore.Qt.ItemIsDragEnabled | self.QtCore.Qt.ItemIsUserCheckable)
+                item.setCheckState(0, self.QtCore.Qt.Checked if layer.visible else self.QtCore.Qt.Unchecked)
+                character_roots[parent_label].addChild(item)
+        panel_item.setExpanded(True)
+        self.layer_tree.expandAll()
+        self.layer_tree.blockSignals(False)
+
+    def _refresh_pivot_tree(self) -> None:
+        if not hasattr(self, "pivot_tree"):
+            return
+        self.pivot_tree.clear()
+        if self.segmentation_session is None or self.segmentation_session.active_layer is None:
+            return
+        for pivot in self.segmentation_session.active_layer.pivots:
+            item = self.QtWidgets.QTreeWidgetItem([pivot.name, f"{pivot.x:.1f}", f"{pivot.y:.1f}"])
+            self.pivot_tree.addTopLevelItem(item)
 
     def _populate_project_tree(self, root_path: Path, images: list[Path]) -> None:
         self.project_tree.clear()

@@ -58,4 +58,5 @@
 - Added incomplete-rig support and tests for partial close-ups plus multiple characters in one panel.
 - Added GUI Panel Detection controls, expected panel/character counts, preview overlays, approval state, and correction-mode actions.
 - Refined the GUI workflow with an Auto/1-20 panel-count slider, per-panel expected-character controls, confidence/status review table, translucent panel/character mask previews, and export blocking until detections are approved.
+- Added `InteractiveSegmentationSession` for click-to-segment editing: positive/negative prompts, independent mask layers, label suggestions, mask editing tools, layer-tree operations, pivots, and live preview controls.
 
