@@ -51,6 +51,20 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1
 
 Both scripts activate `.venv` when present, verify dependencies, and launch the PySide6 GUI.
 
+## Development executable build on Windows
+
+From the repository root:
+
+```bat
+dev_build.bat
+```
+
+This uses PyInstaller to build and smoke-launch:
+
+```text
+dist\MangaAnimatorPrep.exe
+```
+
 ## CLI
 
 ```bash
