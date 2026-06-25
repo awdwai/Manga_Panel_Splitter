@@ -34,4 +34,17 @@
 
 - Initial repository had only a placeholder README, so the project was created from scratch on a feature branch.
 - The execution environment exposes Python as `python3`; documentation uses `python3` commands.
+- Automated tests initially found that speech bubbles could be missed when a white bubble interior merged with a white panel background.
+- Added black-outline speech contour detection.
+- A second test run showed panel borders could merge with bubble outlines in cropped panels.
+- Added removal of border-connected ink components before speech contour detection.
+
+## Verification
+
+- Installed dependencies from `requirements.txt` successfully.
+- Created model cache directories with `scripts/download_models.py --verify`.
+- Runtime probe confirmed PyTorch is installed; CUDA is not visible in this cloud machine, so CPU fallback was used.
+- `python3 -m pytest -q` passed with 5 tests.
+- Generated synthetic manga sample data and processed it successfully.
+- Generated benchmark reports with per-panel timings, CPU samples, VRAM samples, and model load timings.
 
