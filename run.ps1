@@ -36,31 +36,7 @@ try {
         throw "Dependency check failed."
     }
 
-    $verifyScript = @'
-import importlib.util
-import sys
-
-required = [
-    "cv2",
-    "numpy",
-    "PIL",
-    "pydantic",
-    "rich",
-    "PySide6",
-    "tqdm",
-    "psutil",
-    "onnxruntime",
-    "torch",
-    "torchvision",
-    "MangaAnimatorPrep",
-]
-missing = [name for name in required if importlib.util.find_spec(name) is None]
-if missing:
-    print("Missing required Python modules: " + ", ".join(missing))
-    sys.exit(1)
-print("Required runtime dependencies found.")
-'@
-    & $pythonExe @pythonArgs -c $verifyScript
+    & $pythonExe @pythonArgs "scripts\check_runtime.py"
     if ($LASTEXITCODE -ne 0) {
         throw "Required GUI dependencies are missing."
     }

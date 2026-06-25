@@ -37,7 +37,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-%PYTHON% -c "import importlib.util, sys; required=('cv2','numpy','PIL','pydantic','rich','PySide6','tqdm','psutil','onnxruntime','torch','torchvision','MangaAnimatorPrep'); missing=[m for m in required if importlib.util.find_spec(m) is None]; print('Missing required Python modules: '+', '.join(missing)) if missing else print('Required runtime dependencies found.'); sys.exit(1 if missing else 0)"
+%PYTHON% "scripts\check_runtime.py"
 if errorlevel 1 (
     echo.
     echo ERROR: Runtime dependencies are missing. Install dependencies first:
