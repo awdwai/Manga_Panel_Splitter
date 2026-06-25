@@ -74,7 +74,8 @@ class AppConfig(BaseModel):
         config_path = Path(path)
         data = json.loads(config_path.read_text(encoding="utf-8"))
         base = cls.from_environment()
-        return base.model_copy(update=data)
+        merged = _deep_merge(base.to_json_dict(), data)
+        return cls.model_validate(merged)
 
     @classmethod
     def from_environment(cls) -> "AppConfig":
@@ -101,4 +102,16 @@ def load_config(path: Path | str | None = None) -> AppConfig:
     """Load application config from a JSON file and environment overrides."""
 
     return AppConfig.from_file(path)
+
+
+def _deep_merge(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+    """Merge nested config dictionaries while preserving Pydantic validation."""
+
+    merged = dict(base)
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
 

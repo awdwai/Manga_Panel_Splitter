@@ -25,7 +25,11 @@ class LaMaInpainter:
         mask = normalize_mask(removal_mask)
         if cv2.countNonZero(mask) == 0:
             return image.copy()
-        backend = self._load_lama_if_configured()
+        try:
+            backend = self._load_lama_if_configured()
+        except Exception as exc:  # pragma: no cover - optional backend
+            LOGGER.warning("LaMa backend could not be loaded, using OpenCV fallback: %s", exc)
+            backend = None
         if backend is not None:
             try:
                 return backend.inpaint(image, mask)
@@ -58,10 +62,21 @@ class LaMaAdapter:
     def __init__(self, module: object, config: AppConfig) -> None:
         self.module = module
         self.config = config
+        if not config.models.lama_checkpoint:
+            raise RuntimeError("LaMa checkpoint path is required")
+        # LaMa distributions expose different application APIs. Validate the package and
+        # checkpoint early, then use the explicit OpenCV fallback unless a callable pipeline
+        # object is available from the installed package.
+        self.pipeline = getattr(module, "inpaint", None)
 
     def inpaint(self, image: np.ndarray, mask: np.ndarray) -> np.ndarray:
-        raise NotImplementedError(
-            "LaMa adapter requires checkpoint-specific model construction. "
-            "Unset lama_checkpoint to use OpenCV fallback."
-        )
+        if not callable(self.pipeline):
+            raise RuntimeError("Installed LaMa package does not expose a callable inpaint API")
+        result = self.pipeline(image=image, mask=mask, checkpoint=str(self.config.models.lama_checkpoint))
+        result_array = np.asarray(result)
+        if result_array.shape[:2] != image.shape[:2]:
+            raise RuntimeError("LaMa result shape does not match input image")
+        if result_array.ndim == 2:
+            result_array = cv2.cvtColor(result_array, cv2.COLOR_GRAY2RGB)
+        return result_array[:, :, :3].astype(np.uint8)
 

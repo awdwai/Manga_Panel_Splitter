@@ -27,6 +27,7 @@ python3 -m pip install -r requirements.txt
 python3 scripts/download_models.py --models-dir MangaAnimatorPrep/models
 python3 -m MangaAnimatorPrep.main process sample_data --output output --debug
 python3 -m MangaAnimatorPrep.main benchmark sample_data --output output
+python3 -m MangaAnimatorPrep.main gui
 python3 -m pytest -q
 ```
 
@@ -39,7 +40,15 @@ mixed precision if PyTorch reports CUDA availability.
 ```bash
 python3 -m MangaAnimatorPrep.main process <input-file-or-directory> --output output --debug
 python3 -m MangaAnimatorPrep.main benchmark <input-file-or-directory> --output output
+python3 -m MangaAnimatorPrep.main gui
+python3 -m MangaAnimatorPrep.main gui --smoke-test
 python3 -m MangaAnimatorPrep.main system-info
+```
+
+Linux environments may need the OS Tkinter package before launching the desktop GUI:
+
+```bash
+sudo apt-get install python3-tk
 ```
 
 ## Output structure

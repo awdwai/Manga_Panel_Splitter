@@ -34,6 +34,9 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--output", type=Path, default=Path("output"), help="Output directory.")
     benchmark.add_argument("--debug", action="store_true", help="Write debug visualizations.")
 
+    gui = subparsers.add_parser("gui", help="Launch the desktop GUI.")
+    gui.add_argument("--smoke-test", action="store_true", help="Validate GUI import/window creation without entering mainloop.")
+
     subparsers.add_parser("system-info", help="Print runtime GPU/ONNX/PyTorch capability information.")
     return parser
 
@@ -68,6 +71,16 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "system-info":
         print_system_info(args.config)
+        return 0
+
+    if args.command == "gui":
+        from MangaAnimatorPrep.gui import gui_smoke_test, launch_gui
+
+        if args.smoke_test:
+            result = gui_smoke_test()
+            CONSOLE.print(result)
+            return 0 if result["status"] in {"working", "headless"} else 1
+        launch_gui(args.config)
         return 0
 
     config = load_config(args.config)

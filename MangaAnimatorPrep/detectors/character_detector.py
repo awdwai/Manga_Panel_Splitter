@@ -23,7 +23,11 @@ class CharacterDetector:
         self.config = config
 
     def detect(self, panel: np.ndarray) -> list[Detection]:
-        backend = self._load_grounding_dino_if_configured()
+        try:
+            backend = self._load_grounding_dino_if_configured()
+        except Exception as exc:  # pragma: no cover - optional backend
+            LOGGER.warning("GroundingDINO backend could not be loaded, using fallback: %s", exc)
+            backend = None
         if backend is not None:
             try:
                 return backend.detect(panel)
@@ -111,8 +115,79 @@ class GroundingDinoAdapter:
     def __init__(self, module: object, config: AppConfig) -> None:
         self.module = module
         self.config = config
-        raise NotImplementedError(
-            "GroundingDINO adapter requires project-specific checkpoint construction. "
-            "Unset grounding_dino_checkpoint to use fallback detection."
-        )
+        if not config.models.grounding_dino_config or not config.models.grounding_dino_checkpoint:
+            raise RuntimeError("GroundingDINO requires both config and checkpoint paths")
+        load_model = getattr(module, "load_model", None)
+        if load_model is None:
+            raise RuntimeError("groundingdino.util.inference.load_model is unavailable")
+        torch = importlib.import_module("torch")
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        try:
+            self.model = load_model(
+                str(config.models.grounding_dino_config),
+                str(config.models.grounding_dino_checkpoint),
+                device=self.device,
+            )
+        except TypeError:
+            self.model = load_model(str(config.models.grounding_dino_config), str(config.models.grounding_dino_checkpoint))
+
+    def detect(self, panel: np.ndarray) -> list[Detection]:
+        predict = getattr(self.module, "predict", None)
+        if predict is None:
+            raise RuntimeError("groundingdino.util.inference.predict is unavailable")
+        try:
+            boxes, logits, phrases = predict(
+                model=self.model,
+                image=panel,
+                caption="person . character . face . body .",
+                box_threshold=self.config.confidence_threshold,
+                text_threshold=0.25,
+                device=self.device,
+            )
+        except TypeError:
+            boxes, logits, phrases = predict(
+                self.model,
+                panel,
+                "person . character . face . body .",
+                self.config.confidence_threshold,
+                0.25,
+            )
+        return self._to_detections(panel, boxes, logits, phrases)
+
+    def _to_detections(self, panel: np.ndarray, boxes: object, logits: object, phrases: object) -> list[Detection]:
+        height, width = panel.shape[:2]
+        box_array = self._as_numpy(boxes)
+        logit_array = self._as_numpy(logits).reshape(-1) if logits is not None else np.ones((len(box_array),), dtype=np.float32)
+        phrase_list = list(phrases) if phrases is not None else ["character"] * len(box_array)
+        detections: list[Detection] = []
+        for idx, raw_box in enumerate(box_array):
+            if len(raw_box) < 4:
+                continue
+            x1, y1, x2, y2 = self._convert_box(raw_box[:4], width, height)
+            bbox = BoundingBox(x1, y1, x2 - x1, y2 - y1).clamp(width, height)
+            if bbox.area <= 0:
+                continue
+            mask = np.zeros((height, width), dtype=np.uint8)
+            mask[bbox.y : bbox.y2, bbox.x : bbox.x2] = 255
+            confidence = float(logit_array[idx]) if idx < len(logit_array) else 0.5
+            label = str(phrase_list[idx]) if idx < len(phrase_list) else "character"
+            detections.append(Detection("character", bbox, confidence, mask=mask, label=label))
+        return detections
+
+    def _convert_box(self, raw_box: np.ndarray, width: int, height: int) -> tuple[int, int, int, int]:
+        values = raw_box.astype(float)
+        if float(np.max(values)) <= 1.5:
+            cx, cy, bw, bh = values
+            x1 = int((cx - bw / 2) * width)
+            y1 = int((cy - bh / 2) * height)
+            x2 = int((cx + bw / 2) * width)
+            y2 = int((cy + bh / 2) * height)
+        else:
+            x1, y1, x2, y2 = [int(value) for value in values]
+        return x1, y1, x2, y2
+
+    def _as_numpy(self, value: object) -> np.ndarray:
+        if hasattr(value, "detach"):
+            value = value.detach().cpu().numpy()
+        return np.asarray(value)
 
