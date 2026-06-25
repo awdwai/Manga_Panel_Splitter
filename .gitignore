@@ -1,0 +1,46 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Build artifacts
+build/
+dist/
+*.spec
+
+# Generated outputs and smoke-test artifacts
+output/
+output_*/
+run_check_output/
+run_check_benchmark/
+gui_smoke_output/
+gui_migration_output/
+launcher_gui_smoke_output/
+sample_data/
+
+# Model caches and large downloaded checkpoints
+MangaAnimatorPrep/models/
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.ckpt
+*.caffemodel
+
+# Logs and local reports
+*.log
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
