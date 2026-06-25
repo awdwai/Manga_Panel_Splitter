@@ -34,12 +34,15 @@ def test_gui_detection_controls_preview_and_approval(tmp_path: Path) -> None:
     create_sample(sample)
     window = MangaAnimatorPrepMainWindow()
     assert window.auto_panels_checkbox.text() == "Automatically Detect Panels"
-    assert window.expected_panels_combo.count() == 21
-    assert window.expected_characters_combo.count() == 11
+    assert window.expected_panels_slider.minimum() == 0
+    assert window.expected_panels_slider.maximum() == 20
+    assert window.expected_panels_label.text() == "Auto"
+    assert window.expected_characters_default.maximum() == 10
     assert window.load_image_path(sample) is True
     window._run_detection_preview()
     assert window.detection_session is not None
     assert window.overlay_items
+    assert window.detection_review_table.rowCount() > 0
     window._approve_detections()
     assert window.detections_approved is True
     window.close()

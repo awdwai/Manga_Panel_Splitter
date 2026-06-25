@@ -6,12 +6,15 @@ import os
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from MangaAnimatorPrep.config import load_config
 from MangaAnimatorPrep.pipeline import MangaAnimatorPipeline
-from MangaAnimatorPrep.workflow import DetectionSession, DetectionWorkflow
+from MangaAnimatorPrep.types import BoundingBox, Detection
+from MangaAnimatorPrep.workflow import DetectionSession, DetectionWorkflow, PanelDraft
 from MangaAnimatorPrep.utils.file_utils import list_images
 from MangaAnimatorPrep.utils.gpu import resolve_runtime, torch_cuda_available
-from MangaAnimatorPrep.utils.image_utils import load_image
+from MangaAnimatorPrep.utils.image_utils import load_image, normalize_mask
 
 
 def _import_qt() -> dict[str, Any]:
@@ -122,6 +125,8 @@ class MangaAnimatorPrepMainWindow:
         self.detection_session: DetectionSession | None = None
         self.detections_approved = False
         self.overlay_items: list[Any] = []
+        self.panel_expected_character_controls: dict[str, Any] = {}
+        self.brush_correction_enabled = False
 
         self.window = QtWidgets.QMainWindow()
         self.window.setWindowTitle("MangaAnimatorPrep")
@@ -266,20 +271,39 @@ class MangaAnimatorPrepMainWindow:
         panel_layout = self.QtWidgets.QFormLayout(panel_group)
         self.auto_panels_checkbox = self.QtWidgets.QCheckBox("Automatically Detect Panels")
         self.auto_panels_checkbox.setChecked(True)
-        self.expected_panels_combo = self.QtWidgets.QComboBox()
-        self.expected_panels_combo.addItem("Auto", None)
-        for value in range(1, 21):
-            self.expected_panels_combo.addItem(str(value), value)
+        slider_row = self.QtWidgets.QWidget()
+        slider_layout = self.QtWidgets.QHBoxLayout(slider_row)
+        slider_layout.setContentsMargins(0, 0, 0, 0)
+        self.expected_panels_slider = self.QtWidgets.QSlider(self.QtCore.Qt.Horizontal)
+        self.expected_panels_slider.setRange(0, 20)
+        self.expected_panels_slider.setValue(0)
+        self.expected_panels_label = self.QtWidgets.QLabel("Auto")
+        self.expected_panels_slider.valueChanged.connect(
+            lambda value: self.expected_panels_label.setText("Auto" if value == 0 else str(value))
+        )
+        slider_layout.addWidget(self.expected_panels_slider, 1)
+        slider_layout.addWidget(self.expected_panels_label)
         panel_layout.addRow(self.auto_panels_checkbox)
-        panel_layout.addRow("Expected Number of Panels", self.expected_panels_combo)
+        panel_layout.addRow("Expected Number of Panels", slider_row)
 
         char_group = self.QtWidgets.QGroupBox("Character Detection")
         char_layout = self.QtWidgets.QFormLayout(char_group)
-        self.expected_characters_combo = self.QtWidgets.QComboBox()
-        self.expected_characters_combo.addItem("Auto", None)
-        for value in range(1, 11):
-            self.expected_characters_combo.addItem(str(value), value)
-        char_layout.addRow("Expected Characters", self.expected_characters_combo)
+        self.expected_characters_default = self.QtWidgets.QSpinBox()
+        self.expected_characters_default.setRange(0, 10)
+        self.expected_characters_default.setSpecialValueText("Auto")
+        self.expected_characters_default.setValue(0)
+        char_layout.addRow("Default Expected Characters", self.expected_characters_default)
+
+        review_group = self.QtWidgets.QGroupBox("Detection Review")
+        review_layout = self.QtWidgets.QVBoxLayout(review_group)
+        self.preview_stage_combo = self.QtWidgets.QComboBox()
+        self.preview_stage_combo.addItems(["Original", "Detected Panels", "Detected Characters", "Detected Body Parts", "Background", "Masks"])
+        self.preview_stage_combo.currentTextChanged.connect(lambda _value: self._refresh_detection_review())
+        self.detection_review_table = self.QtWidgets.QTableWidget(0, 5)
+        self.detection_review_table.setHorizontalHeaderLabels(["Type", "ID", "Confidence", "Status", "Expected Characters"])
+        self.detection_review_table.horizontalHeader().setStretchLastSection(True)
+        review_layout.addWidget(self.preview_stage_combo)
+        review_layout.addWidget(self.detection_review_table)
 
         correction_group = self.QtWidgets.QGroupBox("Interactive Correction Mode")
         correction_layout = self.QtWidgets.QGridLayout(correction_group)
@@ -297,7 +321,7 @@ class MangaAnimatorPrepMainWindow:
         ]
         for index, label in enumerate(labels):
             button = self.QtWidgets.QPushButton(label)
-            button.clicked.connect(lambda _checked=False, text=label: self._log(f"{text}: select/edit overlays in the preview; mask painting is recorded before export."))
+            button.clicked.connect(lambda _checked=False, text=label: self._handle_correction_action(text))
             correction_layout.addWidget(button, index // 2, index % 2)
 
         detect_button = self.QtWidgets.QPushButton("Detect Panels / Characters")
@@ -308,6 +332,7 @@ class MangaAnimatorPrepMainWindow:
 
         layout.addWidget(panel_group)
         layout.addWidget(char_group)
+        layout.addWidget(review_group)
         layout.addWidget(correction_group)
         layout.addWidget(detect_button)
         layout.addWidget(approve_button)
@@ -355,6 +380,16 @@ class MangaAnimatorPrepMainWindow:
     def _start_processing(self, benchmark: bool) -> None:
         if self.input_path is None:
             self.QtWidgets.QMessageBox.warning(self.window, "Input missing", "Load an image or folder before processing.")
+            return
+        if not self.detections_approved:
+            if self.detection_session is None:
+                self._run_detection_preview()
+            self.QtWidgets.QMessageBox.warning(
+                self.window,
+                "Approval required",
+                "Review and approve panel/character detections before exporting layers.",
+            )
+            self._log("Export blocked: panel/character detections require user approval.")
             return
         self.progress_bar.setValue(0)
         self.status_label.setText("Running benchmark..." if benchmark else "Processing...")
@@ -426,9 +461,11 @@ class MangaAnimatorPrepMainWindow:
         config = load_config(self.config_path)
         apply_workflow_options(config, self._workflow_options())
         self.detection_session = DetectionWorkflow(config).detect(self.input_path)
+        self._apply_panel_expected_character_controls(self.detection_session)
         self.detections_approved = False
         self.approval_label.setText("Review/edit detections, then approve masks.")
         self._draw_detection_overlays(self.detection_session)
+        self._populate_detection_review(self.detection_session)
         low_conf = self.detection_session.low_confidence_items
         if low_conf:
             self._log("Low confidence detections require review: " + ", ".join(low_conf))
@@ -451,32 +488,161 @@ class MangaAnimatorPrepMainWindow:
         panel_pen = self.QtGui.QPen(self.QtGui.QColor("#4e9af1"), 3)
         char_pen = self.QtGui.QPen(self.QtGui.QColor("#f5c542"), 2)
         low_pen = self.QtGui.QPen(self.QtGui.QColor("#ff4d4d"), 3)
+        panel_mask_color = self.QtGui.QColor(78, 154, 241, 45)
+        char_mask_color = self.QtGui.QColor(245, 197, 66, 60)
         for panel in session.panels:
             bbox = panel.detection.bbox
             pen = panel_pen if panel.detection.confidence >= 0.80 else low_pen
+            if panel.detection.mask is not None:
+                self._add_mask_overlay(panel.detection.mask, 0, 0, panel_mask_color)
             rect_item = self.image_scene.addRect(bbox.x, bbox.y, bbox.width, bbox.height, pen)
             rect_item.setFlag(self.QtWidgets.QGraphicsItem.ItemIsMovable, True)
             rect_item.setFlag(self.QtWidgets.QGraphicsItem.ItemIsSelectable, True)
+            rect_item.setData(0, ("panel", panel.panel_id))
             self.overlay_items.append(rect_item)
             for character in panel.characters:
                 cb = character.bbox
                 x = bbox.x + cb.x
                 y = bbox.y + cb.y
                 cpen = char_pen if character.confidence >= 0.80 else low_pen
+                if character.mask is not None:
+                    self._add_mask_overlay(character.mask, bbox.x, bbox.y, char_mask_color)
                 char_item = self.image_scene.addRect(x, y, cb.width, cb.height, cpen)
                 char_item.setFlag(self.QtWidgets.QGraphicsItem.ItemIsMovable, True)
                 char_item.setFlag(self.QtWidgets.QGraphicsItem.ItemIsSelectable, True)
+                char_item.setData(0, ("character", panel.panel_id))
                 self.overlay_items.append(char_item)
 
     def _workflow_options(self) -> dict[str, object]:
+        expected_panels = self.expected_panels_slider.value() or None
+        expected_characters = self.expected_characters_default.value() or None
         return {
             "auto_detect_panels": self.auto_panels_checkbox.isChecked(),
-            "expected_panels": self.expected_panels_combo.currentData(),
-            "expected_characters": self.expected_characters_combo.currentData(),
+            "expected_panels": expected_panels,
+            "expected_characters": expected_characters,
             "approved_character_masks": self.detections_approved,
             "approved_body_part_masks": False,
             "require_user_approval": True,
         }
+
+    def _add_mask_overlay(self, mask: np.ndarray, offset_x: int, offset_y: int, color: Any) -> None:
+        normalized = normalize_mask(mask)
+        if normalized.ndim != 2 or int(np.count_nonzero(normalized)) == 0:
+            return
+        height, width = normalized.shape
+        rgba = np.zeros((height, width, 4), dtype=np.uint8)
+        rgba[..., 0] = color.red()
+        rgba[..., 1] = color.green()
+        rgba[..., 2] = color.blue()
+        rgba[..., 3] = np.where(normalized > 0, color.alpha(), 0).astype(np.uint8)
+        image = self.QtGui.QImage(rgba.data, width, height, 4 * width, self.QtGui.QImage.Format_RGBA8888).copy()
+        pixmap_item = self.image_scene.addPixmap(self.QtGui.QPixmap.fromImage(image))
+        pixmap_item.setOffset(offset_x, offset_y)
+        pixmap_item.setZValue(2)
+        self.overlay_items.append(pixmap_item)
+
+    def _populate_detection_review(self, session: DetectionSession) -> None:
+        self.panel_expected_character_controls.clear()
+        self.detection_review_table.setRowCount(0)
+        for panel in session.panels:
+            self._add_review_row("Panel", panel.panel_id, panel.detection.confidence, panel.expected_characters)
+            for index, character in enumerate(panel.characters, start=1):
+                self._add_review_row("Character", f"{panel.panel_id}/character_{index:03d}", character.confidence, None)
+
+    def _add_review_row(self, item_type: str, item_id: str, confidence: float, expected_characters: int | None) -> None:
+        row = self.detection_review_table.rowCount()
+        self.detection_review_table.insertRow(row)
+        status = "Approved" if self.detections_approved else ("Needs Review" if confidence < 0.80 else "Review")
+        values = [item_type, item_id, f"{confidence:.2f}", status]
+        for col, value in enumerate(values):
+            item = self.QtWidgets.QTableWidgetItem(value)
+            if confidence < 0.50:
+                item.setBackground(self.QtGui.QColor("#7f1d1d"))
+            elif confidence < 0.80:
+                item.setBackground(self.QtGui.QColor("#7c5f00"))
+            self.detection_review_table.setItem(row, col, item)
+        if item_type == "Panel":
+            spin = self.QtWidgets.QSpinBox()
+            spin.setRange(0, 10)
+            spin.setSpecialValueText("Auto")
+            spin.setValue(expected_characters or 0)
+            self.panel_expected_character_controls[item_id] = spin
+            self.detection_review_table.setCellWidget(row, 4, spin)
+        else:
+            self.detection_review_table.setItem(row, 4, self.QtWidgets.QTableWidgetItem(""))
+
+    def _refresh_detection_review(self) -> None:
+        if self.detection_session is not None:
+            self._draw_detection_overlays(self.detection_session)
+
+    def _apply_panel_expected_character_controls(self, session: DetectionSession) -> None:
+        for panel in session.panels:
+            control = self.panel_expected_character_controls.get(panel.panel_id)
+            if control is not None:
+                value = int(control.value())
+                panel.expected_characters = value or None
+
+    def _handle_correction_action(self, action: str) -> None:
+        if self.detection_session is None:
+            self._log(f"{action}: run detection first.")
+            return
+        if action == "Add Panel":
+            self._add_manual_panel()
+        elif action == "Delete Panel":
+            self._delete_selected_overlays("panel")
+        elif action == "Add Character":
+            self._add_manual_character()
+        elif action == "Delete Character":
+            self._delete_selected_overlays("character")
+        elif action == "Brush Correction Mask":
+            self.brush_correction_enabled = not self.brush_correction_enabled
+            self._log(f"Brush correction mode {'enabled' if self.brush_correction_enabled else 'disabled'}.")
+        else:
+            self._log(f"{action}: select overlays in preview; current operation is recorded for manual correction.")
+        self.detections_approved = False
+        self.approval_label.setText("Corrections changed detections; approval required.")
+
+    def _add_manual_panel(self) -> None:
+        if self.detection_session is None:
+            return
+        rect = self.image_scene.sceneRect()
+        width = max(1, int(rect.width() * 0.5))
+        height = max(1, int(rect.height() * 0.5))
+        x = int(rect.x() + rect.width() * 0.25)
+        y = int(rect.y() + rect.height() * 0.25)
+        mask = np.zeros((int(rect.height()), int(rect.width())), dtype=np.uint8)
+        mask[y : y + height, x : x + width] = 255
+        panel_id = f"panel_{len(self.detection_session.panels) + 1:03d}"
+        self.detection_session.panels.append(
+            PanelDraft(panel_id=panel_id, detection=Detection("panel", BoundingBox(x, y, width, height), 0.50, mask=mask, label="manual_panel"))
+        )
+        self._draw_detection_overlays(self.detection_session)
+        self._populate_detection_review(self.detection_session)
+        self._log(f"Added manual panel {panel_id}.")
+
+    def _add_manual_character(self) -> None:
+        if self.detection_session is None or not self.detection_session.panels:
+            return
+        panel = self.detection_session.panels[0]
+        pb = panel.detection.bbox
+        width = max(24, int(pb.width * 0.25))
+        height = max(32, int(pb.height * 0.45))
+        x = max(0, int(pb.width * 0.375))
+        y = max(0, int(pb.height * 0.25))
+        mask = np.zeros((pb.height, pb.width), dtype=np.uint8)
+        mask[y : y + height, x : x + width] = 255
+        panel.characters.append(Detection("character", BoundingBox(x, y, width, height), 0.50, mask=mask, label="manual_character"))
+        self._draw_detection_overlays(self.detection_session)
+        self._populate_detection_review(self.detection_session)
+        self._log(f"Added manual character to {panel.panel_id}.")
+
+    def _delete_selected_overlays(self, item_type: str) -> None:
+        selected = [item for item in self.image_scene.selectedItems() if item.data(0) and item.data(0)[0] == item_type]
+        for item in selected:
+            self.image_scene.removeItem(item)
+            if item in self.overlay_items:
+                self.overlay_items.remove(item)
+        self._log(f"Deleted {len(selected)} selected {item_type} overlay(s).")
 
     def _populate_project_tree(self, root_path: Path, images: list[Path]) -> None:
         self.project_tree.clear()
@@ -515,6 +681,9 @@ def gui_smoke_test(sample_input: Path | None = None, output_dir: Path | None = N
             result["image_loaded"] = window.load_image_path(sample_input)
             app.processEvents()
         if sample_input is not None and output_dir is not None:
+            window._run_detection_preview()
+            window._approve_detections()
+            app.processEvents()
             panel_count = window.run_processing_blocking(sample_input, output_dir, benchmark=False)
             app.processEvents()
             result["processing_triggered"] = True
