@@ -1,0 +1,12 @@
+numpy
+opencv-python-headless
+pillow
+pydantic
+rich
+tqdm
+psutil
+onnxruntime-gpu
+torch
+torchvision
+pytest
+
