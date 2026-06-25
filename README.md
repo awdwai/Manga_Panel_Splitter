@@ -35,6 +35,22 @@ On Windows 11 with an RTX 5060, install a CUDA-enabled PyTorch build that matche
 driver/CUDA runtime before running the application. The app will automatically use CUDA and
 mixed precision if PyTorch reports CUDA availability.
 
+## Local GUI launch on Windows
+
+From the repository root, use one of:
+
+```bat
+run.bat
+```
+
+or:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\run.ps1
+```
+
+Both scripts activate `.venv` when present, verify dependencies, and launch the PySide6 GUI.
+
 ## CLI
 
 ```bash
