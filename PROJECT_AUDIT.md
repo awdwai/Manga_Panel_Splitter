@@ -53,9 +53,9 @@ MediaPipe, GroundingDINO, SAM2, LaMa/saicinpainting, OpenPose, or Stable Diffusi
 | Effect detection | **PARTIAL** | Real OpenCV implementation exists in `detectors/effect_detector.py`, using `cv2.HoughLinesP` for speed/motion lines. It is heuristic and does not classify energy/impact effects with an AI model. |
 | Segmentation | **PARTIAL / PLACEHOLDER AI** | `segmentation/sam_segmenter.py` contains a SAM2 adapter hook, but SAM2 is not installed and no checkpoint is present. The actual working path is `_fallback_segment`, which uses grayscale thresholding, bbox masks, morphology, and blur. This is real image processing, but not real AI segmentation. |
 | Pose estimation | **PARTIAL / PLACEHOLDER AI** | `detectors/pose_detector.py` attempts to import MediaPipe, but MediaPipe is not installed. The actual working path is `_estimate_geometric`, which generates keypoints from bounding-box/mask proportions. This is not real pose estimation in the current environment. |
-| Body-part splitting | **PARTIAL** | `segmentation/body_part_splitter.py` does create separate named masks for head, hair, torso, arms, hands, legs, and feet. However, `_geometric_regions` defines fixed rectangular regions over the character bbox and intersects them with the character mask. This is limb separation by geometry, not semantic body-part segmentation. |
+| Body-part splitting | **PARTIAL / APPROVAL-GATED** | `segmentation/body_part_splitter.py` no longer exports geometric body slices by default. It requires approved semantic/correction masks; otherwise it exports no body-part PNGs and records `body_part_masks_not_approved` metadata. |
 | Inpainting / background reconstruction | **PARTIAL** | `inpainting/lama_inpainter.py` attempts a LaMa adapter only if configured, but `saicinpainting` is not installed. The actual working reconstruction is OpenCV `cv2.inpaint` using Telea and Navier-Stokes. This is real classical inpainting, not LaMa or Stable Diffusion. |
-| Export system | **WORKING** | `exporters/layer_exporter.py` writes panel images, background images, speech/text/effects folders, character alpha PNGs, body-part PNGs, and debug overlays. `exporters/rig_exporter.py` writes rig JSON with hierarchy, bboxes, pivots, and confidence. |
+| Export system | **WORKING** | `exporters/layer_exporter.py` writes panel images, background images, speech/text/effects folders, character alpha PNGs, approved body-part PNGs when present, metadata JSON, and debug overlays. `exporters/rig_exporter.py` writes incomplete-safe rig JSON. |
 | GUI | **PARTIAL** | GUI exists in `gui.py` and uses PySide6. It includes dockable panels, dark theme, image viewer, project explorer, properties panel, processing console, progress bar, and settings dialog. It remains partial because it is still a wrapper around the heuristic pipeline rather than a full production editing application. |
 | CUDA / GPU acceleration | **PARTIAL / NOT USED HERE** | `utils/gpu.py` detects CUDA with `torch.cuda.is_available()` and sets runtime metadata. In this environment, `torch.cuda.is_available()` is false, so runtime device is CPU. No real inference model is loaded on CUDA. ONNX Runtime CUDA provider is present, but no ONNX model inference is used. |
 | Model caching | **WORKING FOR HOOKS** | `utils/model_cache.py` caches loaded optional backends. In practice, only the failed/None MediaPipe loader is cached in this environment; heavy models are not installed. |
@@ -154,13 +154,13 @@ Classification: **PySide6 GUI, PARTIAL production UX**.
 
 ### 8. Are body parts actually separated into limbs?
 
-**Yes, but only by geometric mask slicing, not by semantic AI parsing.**
+**Not automatically anymore.**
 
 Evidence:
 
-- `BodyPartSplitter.PART_PARENTS` defines head, hair, torso, upper/lower arms, hands, upper/lower legs, and feet.
-- `_geometric_regions` creates fixed rectangles for each body part over the character bounding box.
-- The output part masks are `cv2.bitwise_and(character_mask, region_mask)`.
+- `BodyPartSplitter.analyze()` now requires approved body-part masks.
+- Without approved masks, output metadata marks each body part as `Unknown` with reason `body_part_masks_not_approved`.
+- The default pipeline exports `character.png`, `metadata.json`, and incomplete `rig.json`, but no guessed limb PNGs.
 
 Classification: **PARTIAL**.
 

@@ -41,6 +41,9 @@ def test_pipeline_processes_sample_page(tmp_path: Path) -> None:
     assert metadata["character_id"] == "character_001"
     assert "visible_body_parts" in metadata["body"]
     assert "missing_body_parts" in metadata["body"]
+    assert metadata["workflow"]["body_part_masks_approved"] is False
+    assert metadata["body"]["approval_required"] is True
+    assert not (character_dirs[0] / "left_foot.png").exists()
 
 
 def test_pipeline_exports_multiple_characters_independently(tmp_path: Path) -> None:

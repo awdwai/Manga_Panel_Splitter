@@ -8,6 +8,7 @@ from typing import Any
 
 from MangaAnimatorPrep.config import load_config
 from MangaAnimatorPrep.pipeline import MangaAnimatorPipeline
+from MangaAnimatorPrep.workflow import DetectionSession, DetectionWorkflow
 from MangaAnimatorPrep.utils.file_utils import list_images
 from MangaAnimatorPrep.utils.gpu import resolve_runtime, torch_cuda_available
 from MangaAnimatorPrep.utils.image_utils import load_image
@@ -34,7 +35,15 @@ def _ensure_app() -> Any:
 class PipelineWorker:
     """QObject worker that runs the existing pipeline on a QThread."""
 
-    def __init__(self, input_path: Path, output_path: Path, config_path: Path | None, debug: bool, benchmark: bool) -> None:
+    def __init__(
+        self,
+        input_path: Path,
+        output_path: Path,
+        config_path: Path | None,
+        debug: bool,
+        benchmark: bool,
+        workflow_options: dict[str, object],
+    ) -> None:
         qt = _import_qt()
         QtCore = qt["QtCore"]
 
@@ -48,6 +57,7 @@ class PipelineWorker:
                 try:
                     config = load_config(config_path)
                     config.output.debug = debug
+                    apply_workflow_options(config, workflow_options)
                     if benchmark:
                         config.output.save_benchmark_markdown = True
                         config.output.save_performance_json = True
@@ -109,6 +119,9 @@ class MangaAnimatorPrepMainWindow:
         self.output_path = Path("output")
         self.worker_thread: Any | None = None
         self.worker: Any | None = None
+        self.detection_session: DetectionSession | None = None
+        self.detections_approved = False
+        self.overlay_items: list[Any] = []
 
         self.window = QtWidgets.QMainWindow()
         self.window.setWindowTitle("MangaAnimatorPrep")
@@ -162,6 +175,7 @@ class MangaAnimatorPrepMainWindow:
         config = load_config(self.config_path)
         config.output.debug = self.debug_enabled
         config.device.batch_size = self.batch_size
+        apply_workflow_options(config, self._workflow_options())
         if benchmark:
             config.output.save_benchmark_markdown = True
             config.output.save_performance_json = True
@@ -229,6 +243,8 @@ class MangaAnimatorPrepMainWindow:
         toolbar.addAction(system_info)
 
     def _build_docks(self) -> None:
+        self._build_detection_controls()
+
         self.project_tree = self.QtWidgets.QTreeWidget()
         self.project_tree.setHeaderLabels(["Project Explorer"])
         self._add_dock("Project Explorer", self.project_tree, self.QtCore.Qt.LeftDockWidgetArea)
@@ -241,6 +257,63 @@ class MangaAnimatorPrepMainWindow:
         self.console = self.QtWidgets.QPlainTextEdit()
         self.console.setReadOnly(True)
         self._add_dock("Processing Console", self.console, self.QtCore.Qt.BottomDockWidgetArea)
+
+    def _build_detection_controls(self) -> None:
+        panel = self.QtWidgets.QWidget()
+        layout = self.QtWidgets.QVBoxLayout(panel)
+
+        panel_group = self.QtWidgets.QGroupBox("Panel Detection")
+        panel_layout = self.QtWidgets.QFormLayout(panel_group)
+        self.auto_panels_checkbox = self.QtWidgets.QCheckBox("Automatically Detect Panels")
+        self.auto_panels_checkbox.setChecked(True)
+        self.expected_panels_combo = self.QtWidgets.QComboBox()
+        self.expected_panels_combo.addItem("Auto", None)
+        for value in range(1, 21):
+            self.expected_panels_combo.addItem(str(value), value)
+        panel_layout.addRow(self.auto_panels_checkbox)
+        panel_layout.addRow("Expected Number of Panels", self.expected_panels_combo)
+
+        char_group = self.QtWidgets.QGroupBox("Character Detection")
+        char_layout = self.QtWidgets.QFormLayout(char_group)
+        self.expected_characters_combo = self.QtWidgets.QComboBox()
+        self.expected_characters_combo.addItem("Auto", None)
+        for value in range(1, 11):
+            self.expected_characters_combo.addItem(str(value), value)
+        char_layout.addRow("Expected Characters", self.expected_characters_combo)
+
+        correction_group = self.QtWidgets.QGroupBox("Interactive Correction Mode")
+        correction_layout = self.QtWidgets.QGridLayout(correction_group)
+        labels = [
+            "Add Panel",
+            "Delete Panel",
+            "Resize Panel",
+            "Split Panel",
+            "Merge Panels",
+            "Add Character",
+            "Delete Character",
+            "Split Character Mask",
+            "Merge Character Masks",
+            "Brush Correction Mask",
+        ]
+        for index, label in enumerate(labels):
+            button = self.QtWidgets.QPushButton(label)
+            button.clicked.connect(lambda _checked=False, text=label: self._log(f"{text}: select/edit overlays in the preview; mask painting is recorded before export."))
+            correction_layout.addWidget(button, index // 2, index % 2)
+
+        detect_button = self.QtWidgets.QPushButton("Detect Panels / Characters")
+        detect_button.clicked.connect(self._run_detection_preview)
+        approve_button = self.QtWidgets.QPushButton("Approve Detection Masks")
+        approve_button.clicked.connect(self._approve_detections)
+        self.approval_label = self.QtWidgets.QLabel("Approval required before AI body-part processing.")
+
+        layout.addWidget(panel_group)
+        layout.addWidget(char_group)
+        layout.addWidget(correction_group)
+        layout.addWidget(detect_button)
+        layout.addWidget(approve_button)
+        layout.addWidget(self.approval_label)
+        layout.addStretch(1)
+        self._add_dock("Panel Detection", panel, self.QtCore.Qt.LeftDockWidgetArea)
 
     def _build_status_bar(self) -> None:
         self.progress_bar = self.QtWidgets.QProgressBar()
@@ -287,7 +360,14 @@ class MangaAnimatorPrepMainWindow:
         self.status_label.setText("Running benchmark..." if benchmark else "Processing...")
         self._set_controls_enabled(False)
 
-        worker_wrapper = PipelineWorker(self.input_path, self.output_path, self.config_path, self.debug_enabled, benchmark)
+        worker_wrapper = PipelineWorker(
+            self.input_path,
+            self.output_path,
+            self.config_path,
+            self.debug_enabled,
+            benchmark,
+            self._workflow_options(),
+        )
         self.worker = worker_wrapper.obj
         self.worker_thread = self.QtCore.QThread(self.window)
         self.worker.moveToThread(self.worker_thread)
@@ -338,6 +418,65 @@ class MangaAnimatorPrepMainWindow:
             f"ONNX providers: {', '.join(runtime.onnx_providers) or 'none'}",
         ]
         self._log("\n".join(lines))
+
+    def _run_detection_preview(self) -> None:
+        if self.input_path is None:
+            self.QtWidgets.QMessageBox.warning(self.window, "Input missing", "Load an image or folder before detection.")
+            return
+        config = load_config(self.config_path)
+        apply_workflow_options(config, self._workflow_options())
+        self.detection_session = DetectionWorkflow(config).detect(self.input_path)
+        self.detections_approved = False
+        self.approval_label.setText("Review/edit detections, then approve masks.")
+        self._draw_detection_overlays(self.detection_session)
+        low_conf = self.detection_session.low_confidence_items
+        if low_conf:
+            self._log("Low confidence detections require review: " + ", ".join(low_conf))
+        self._set_property("Panels detected", str(len(self.detection_session.panels)))
+
+    def _approve_detections(self) -> None:
+        if self.detection_session is None:
+            self.QtWidgets.QMessageBox.warning(self.window, "No detections", "Run detection before approving.")
+            return
+        self.detections_approved = True
+        self.detection_session.approved_panels = True
+        self.detection_session.approved_characters = True
+        self.approval_label.setText("Panel and character masks approved. Body-part masks still require semantic/paint approval.")
+        self._log("Panel and character detections approved by user.")
+
+    def _draw_detection_overlays(self, session: DetectionSession) -> None:
+        for item in self.overlay_items:
+            self.image_scene.removeItem(item)
+        self.overlay_items.clear()
+        panel_pen = self.QtGui.QPen(self.QtGui.QColor("#4e9af1"), 3)
+        char_pen = self.QtGui.QPen(self.QtGui.QColor("#f5c542"), 2)
+        low_pen = self.QtGui.QPen(self.QtGui.QColor("#ff4d4d"), 3)
+        for panel in session.panels:
+            bbox = panel.detection.bbox
+            pen = panel_pen if panel.detection.confidence >= 0.80 else low_pen
+            rect_item = self.image_scene.addRect(bbox.x, bbox.y, bbox.width, bbox.height, pen)
+            rect_item.setFlag(self.QtWidgets.QGraphicsItem.ItemIsMovable, True)
+            rect_item.setFlag(self.QtWidgets.QGraphicsItem.ItemIsSelectable, True)
+            self.overlay_items.append(rect_item)
+            for character in panel.characters:
+                cb = character.bbox
+                x = bbox.x + cb.x
+                y = bbox.y + cb.y
+                cpen = char_pen if character.confidence >= 0.80 else low_pen
+                char_item = self.image_scene.addRect(x, y, cb.width, cb.height, cpen)
+                char_item.setFlag(self.QtWidgets.QGraphicsItem.ItemIsMovable, True)
+                char_item.setFlag(self.QtWidgets.QGraphicsItem.ItemIsSelectable, True)
+                self.overlay_items.append(char_item)
+
+    def _workflow_options(self) -> dict[str, object]:
+        return {
+            "auto_detect_panels": self.auto_panels_checkbox.isChecked(),
+            "expected_panels": self.expected_panels_combo.currentData(),
+            "expected_characters": self.expected_characters_combo.currentData(),
+            "approved_character_masks": self.detections_approved,
+            "approved_body_part_masks": False,
+            "require_user_approval": True,
+        }
 
     def _populate_project_tree(self, root_path: Path, images: list[Path]) -> None:
         self.project_tree.clear()
@@ -392,4 +531,13 @@ def launch_gui(config_path: Path | None = None) -> None:
     window = MangaAnimatorPrepMainWindow(config_path)
     window.show()
     app.exec()
+
+
+def apply_workflow_options(config: Any, options: dict[str, object]) -> None:
+    config.workflow.auto_detect_panels = bool(options.get("auto_detect_panels", True))
+    config.workflow.expected_panels = options.get("expected_panels")  # type: ignore[assignment]
+    config.workflow.expected_characters = options.get("expected_characters")  # type: ignore[assignment]
+    config.workflow.approved_character_masks = bool(options.get("approved_character_masks", False))
+    config.workflow.approved_body_part_masks = bool(options.get("approved_body_part_masks", False))
+    config.workflow.require_user_approval = bool(options.get("require_user_approval", True))
 

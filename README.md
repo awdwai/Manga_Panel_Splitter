@@ -89,6 +89,19 @@ Linux systems may also need Qt's EGL runtime library:
 sudo apt-get install libegl1
 ```
 
+## Review-first workflow
+
+The GUI follows a review-first workflow:
+
+1. Import image.
+2. Detect panels/characters with the Panel Detection controls.
+3. Review/edit overlays and approve panel/character masks.
+4. Continue export.
+
+Body-part PNGs are not generated from geometric slicing. If approved semantic/correction body-part
+masks are not available, the app exports `character.png`, `metadata.json`, and an incomplete
+`rig.json` with `body_part_masks_not_approved` statuses instead of fabricating anatomy.
+
 ## Output structure
 
 ```text

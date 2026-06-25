@@ -11,7 +11,7 @@ The production deep-learning backends are **partial** because they require exter
 | Module | Status | Notes |
 |---|---|---|
 | `MangaAnimatorPrep/main.py` | Working | CLI supports `process`, `benchmark`, `system-info`, and `gui`. |
-| `MangaAnimatorPrep/gui.py` | Working | PySide6 GUI provides dockable panels, dark theme, image viewer, project explorer, properties, processing console, progress bar, and settings dialog. |
+| `MangaAnimatorPrep/gui.py` | Partial | PySide6 GUI provides dockable panels, dark theme, image viewer, project explorer, properties, processing console, progress bar, settings dialog, panel/character detection controls, approval controls, and editable preview overlays. Brush-mask editing is scaffolded but not a full paint engine yet. |
 | `MangaAnimatorPrep/config.py` | Working | Environment overrides and validated nested JSON loading work. |
 | `MangaAnimatorPrep/pipeline.py` | Working | End-to-end orchestration, reports, debug exports, and batch image processing work. |
 | `detectors/panel_detector.py` | Working | Detects synthetic rectangular panels and falls back to full image when none are found. |
@@ -21,9 +21,9 @@ The production deep-learning backends are **partial** because they require exter
 | `detectors/effect_detector.py` | Working | Detects speed/motion lines through Hough line heuristics. |
 | `detectors/pose_detector.py` | Partial | Geometric fallback works; MediaPipe is optional and not installed in this cloud environment. |
 | `segmentation/sam_segmenter.py` | Partial | OpenCV fallback works; SAM2 adapter requires real SAM2 config/checkpoint. |
-| `segmentation/body_part_splitter.py` | Working | Produces visible-only body-part masks, bboxes, pivots, and confidence metadata. |
+| `segmentation/body_part_splitter.py` | Partial | No longer fabricates geometric body parts. Exports body-part layers only from approved semantic/correction masks; otherwise writes approval-required metadata. |
 | `inpainting/lama_inpainter.py` | Partial | OpenCV inpainting fallback works; LaMa adapter requires a compatible installed LaMa API/checkpoint. |
-| `exporters/layer_exporter.py` | Working | Exports panel images, backgrounds, transparent layers, character layers, body parts, and debug images. |
+| `exporters/layer_exporter.py` | Working | Exports panel images, backgrounds, transparent layers, character layers, approved body parts when present, metadata, and debug images. |
 | `exporters/rig_exporter.py` | Working | Exports `rig.json` with hierarchy, pivots, bboxes, and confidence. |
 | `utils/gpu.py` | Working | Detects PyTorch/CUDA, mixed precision eligibility, VRAM, and ONNX providers. |
 | `utils/model_cache.py` | Working | Process-local lazy cache avoids reloading models between panels. |

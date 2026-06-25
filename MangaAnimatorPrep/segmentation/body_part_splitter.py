@@ -1,4 +1,4 @@
-"""Body-part segmentation from pose, mask, contours, and geometry heuristics."""
+"""Body-part export from approved semantic/correction masks."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from MangaAnimatorPrep.utils.image_utils import mask_to_bbox, normalize_mask
 
 
 class BodyPartSplitter:
-    """Split visible character masks into animation body-part layers."""
+    """Export visible body parts only after semantic/user-approved masks exist."""
 
     BODY_PARTS = [
         "head",
@@ -64,6 +64,7 @@ class BodyPartSplitter:
         keypoints: list[PoseKeypoint],
         panel: np.ndarray | None = None,
         ambiguous_mask: np.ndarray | None = None,
+        approved_body_part_masks: dict[str, np.ndarray] | None = None,
     ) -> tuple[list[BodyPartLayer], dict[str, object]]:
         """Return visible layers plus complete visibility metadata.
 
@@ -73,6 +74,8 @@ class BodyPartSplitter:
 
         mask = normalize_mask(character_mask)
         bbox = mask_to_bbox(mask)
+        if not approved_body_part_masks:
+            return [], self._approval_required_metadata(bbox)
         if cv2.countNonZero(mask) == 0:
             return [], {
                 "bbox": bbox.to_dict(),
@@ -88,7 +91,10 @@ class BodyPartSplitter:
 
         parts: list[BodyPartLayer] = []
         kp = {point.name: point for point in keypoints}
-        regions = self._geometric_regions(mask, bbox)
+        regions = {
+            name: normalize_mask(approved_body_part_masks.get(name, np.zeros_like(mask)))
+            for name in self.BODY_PARTS
+        }
         ambiguous = normalize_mask(ambiguous_mask) if ambiguous_mask is not None else np.zeros_like(mask)
         metadata: dict[str, object] = {
             "bbox": bbox.to_dict(),
@@ -194,6 +200,29 @@ class BodyPartSplitter:
         rect("right_lower_leg", 0.50, 0.74, 0.72, 0.94)
         rect("right_foot", 0.48, 0.90, 0.78, 1.00)
         return regions
+
+    def _approval_required_metadata(self, bbox: BoundingBox) -> dict[str, object]:
+        return {
+            "bbox": bbox.to_dict(),
+            "visible_body_parts": [],
+            "missing_body_parts": self.BODY_PARTS,
+            "body_parts": {
+                name: {
+                    "status": "Unknown",
+                    "confidence": 0.0,
+                    "bbox": None,
+                    "reason": "body_part_masks_not_approved",
+                    "requires_user_correction": True,
+                }
+                for name in self.BODY_PARTS
+            },
+            "warnings": [
+                "Body parts were not generated because approved semantic body-part masks are required.",
+                "Use the GUI verification/correction workflow before exporting body-part layers.",
+            ],
+            "small_objects": {},
+            "approval_required": True,
+        }
 
     def _classify_visibility(
         self,

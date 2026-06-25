@@ -56,6 +56,18 @@ class OutputConfig(BaseModel):
     transparent_layers: bool = True
 
 
+class WorkflowConfig(BaseModel):
+    """Human-in-the-loop workflow controls."""
+
+    auto_detect_panels: bool = True
+    expected_panels: int | None = Field(default=None, ge=1, le=20)
+    expected_characters: int | None = Field(default=None, ge=1, le=10)
+    require_user_approval: bool = True
+    approved_character_masks: bool = False
+    approved_body_part_masks: bool = False
+    body_part_confidence_threshold: float = Field(default=0.80, ge=0.0, le=1.0)
+
+
 class AppConfig(BaseModel):
     """Top-level application config."""
 
@@ -63,6 +75,7 @@ class AppConfig(BaseModel):
     models: ModelConfig = Field(default_factory=ModelConfig)
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
+    workflow: WorkflowConfig = Field(default_factory=WorkflowConfig)
     min_panel_area_ratio: float = Field(default=0.015, ge=0.0, le=1.0)
     min_character_area_ratio: float = Field(default=0.02, ge=0.0, le=1.0)
     confidence_threshold: float = Field(default=0.25, ge=0.0, le=1.0)

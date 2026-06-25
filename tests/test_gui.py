@@ -27,3 +27,21 @@ def test_pyside6_settings_dialog_constructs() -> None:
     window.close()
     app.processEvents()
 
+
+def test_gui_detection_controls_preview_and_approval(tmp_path: Path) -> None:
+    app = _ensure_app()
+    sample = tmp_path / "sample.png"
+    create_sample(sample)
+    window = MangaAnimatorPrepMainWindow()
+    assert window.auto_panels_checkbox.text() == "Automatically Detect Panels"
+    assert window.expected_panels_combo.count() == 21
+    assert window.expected_characters_combo.count() == 11
+    assert window.load_image_path(sample) is True
+    window._run_detection_preview()
+    assert window.detection_session is not None
+    assert window.overlay_items
+    window._approve_detections()
+    assert window.detections_approved is True
+    window.close()
+    app.processEvents()
+

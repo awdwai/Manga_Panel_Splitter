@@ -90,7 +90,7 @@ class MangaAnimatorPipeline:
         image = load_image(image_path)
         metrics: list[PanelMetrics] = []
         with self.tracker.measure("panel_detection", image=str(image_path)):
-            panel_detections = self.panel_detector.detect(image)
+            panel_detections = self._detect_panels_for_workflow(image)
         if debug:
             debug_dir = ensure_dir(output_dir / "debug")
             save_rgb(debug_dir / f"{image_path.stem}_panel_outlines.png", draw_detections(image, panel_detections))
@@ -105,7 +105,7 @@ class MangaAnimatorPipeline:
             panel_path = self.layer_exporter.export_panel_image(panel_dir, panel_index, panel)
 
             with self.tracker.measure("character_detection", panel=panel_id):
-                characters = self.character_detector.detect(panel)
+                characters = self._detect_characters_for_workflow(panel)
             with self.tracker.measure("speech_detection", panel=panel_id):
                 speech = self.speech_detector.detect(panel)
             with self.tracker.measure("text_detection", panel=panel_id):
@@ -145,6 +145,9 @@ class MangaAnimatorPipeline:
                         keypoints,
                         panel=panel,
                         ambiguous_mask=overlap_info["ambiguous_masks"][character_index - 1],
+                        approved_body_part_masks=None
+                        if not self.config.workflow.approved_body_part_masks
+                        else {},
                     )
                 character_metadata = self._build_character_metadata(
                     character_id,
@@ -202,6 +205,32 @@ class MangaAnimatorPipeline:
             union = cv2.bitwise_or(union, normalize_mask(mask))
         return union
 
+    def _detect_panels_for_workflow(self, image: np.ndarray) -> list[Detection]:
+        if not self.config.workflow.auto_detect_panels:
+            from MangaAnimatorPrep.types import BoundingBox
+
+            height, width = image.shape[:2]
+            mask = np.full((height, width), 255, dtype=np.uint8)
+            return [Detection("panel", BoundingBox(0, 0, width, height), 1.0, mask=mask, label="manual_full_image")]
+        panels = self.panel_detector.detect(image)
+        if self.config.workflow.expected_panels is not None:
+            panels = sorted(panels, key=lambda item: item.confidence, reverse=True)[: self.config.workflow.expected_panels]
+        return sorted(panels, key=lambda det: (det.bbox.y, det.bbox.x))
+
+    def _detect_characters_for_workflow(self, panel: np.ndarray) -> list[Detection]:
+        characters = self.character_detector.detect(panel)
+        if self.config.workflow.expected_characters is not None:
+            expected = self.config.workflow.expected_characters
+            if len(characters) > expected:
+                characters = sorted(characters, key=lambda item: item.confidence, reverse=True)[:expected]
+            elif len(characters) < expected:
+                LOGGER.warning(
+                    "Detected %s character(s), fewer than expected %s; manual clicks/masks are required.",
+                    len(characters),
+                    expected,
+                )
+        return sorted(characters, key=lambda det: (det.bbox.x, det.bbox.y))
+
     def _compute_instance_overlaps(self, masks: list[np.ndarray]) -> dict[str, object]:
         if not masks:
             return {"pairs": [], "ambiguous_masks": [], "ambiguous_union": None}
@@ -255,6 +284,12 @@ class MangaAnimatorPipeline:
         return {
             "schema_version": "1.0",
             "character_id": character_id,
+            "workflow": {
+                "character_masks_approved": self.config.workflow.approved_character_masks,
+                "body_part_masks_approved": self.config.workflow.approved_body_part_masks,
+                "requires_user_approval": self.config.workflow.require_user_approval,
+                "body_part_confidence_threshold": self.config.workflow.body_part_confidence_threshold,
+            },
             "detection": {
                 "bbox": detection.bbox.to_dict(),
                 "confidence": detection.confidence,

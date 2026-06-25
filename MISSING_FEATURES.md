@@ -12,6 +12,8 @@ These items are not blockers for the currently working fallback pipeline, but th
 | Stable Diffusion inpainting fallback | Partial | Config field exists, but no diffusers pipeline is wired yet. |
 | OpenPose fallback | Partial | MediaPipe/geometric fallback works; OpenPose model loading is not implemented. |
 | Full automated checkpoint download | Partial | Large/licensed model artifacts are not downloaded automatically. Cache setup and checksum reporting are implemented. |
+| Semantic body-part segmentation | Partial | Automatic geometric slicing has been disabled; approved semantic/correction masks are required before body-part PNG export. |
+| Full brush-mask editor | Partial | GUI exposes correction actions and editable overlays, but a production paint/mask editor is still needed. |
 
 ## Accuracy limitations
 

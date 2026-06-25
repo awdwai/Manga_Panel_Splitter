@@ -52,7 +52,9 @@
 
 - Added multi-character instance handling so panels can export `character_001`, `character_002`, and later instances independently.
 - Added overlap/ambiguous-pixel metadata so intersecting masks are preserved and reported instead of silently merged.
-- Added partial-body metadata with `Visible`, `Occluded`, `Out of Frame`, and `Unknown` statuses and confidence scores.
-- Changed body-part export to skip empty/invented PNGs and record missing anatomy in `metadata.json`.
+- Replaced automatic geometric body-part slicing with an approval-gated workflow. Body-part PNGs are not generated unless approved semantic/correction masks exist.
+- Added partial-body metadata with `Visible`, `Occluded`, `Out of Frame`, and `Unknown` statuses and confidence scores for approved masks.
+- Changed body-part export to skip empty/invented PNGs and record missing/unapproved anatomy in `metadata.json`.
 - Added incomplete-rig support and tests for partial close-ups plus multiple characters in one panel.
+- Added GUI Panel Detection controls, expected panel/character counts, preview overlays, approval state, and correction-mode actions.
 
