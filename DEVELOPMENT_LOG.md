@@ -48,3 +48,11 @@
 - Generated synthetic manga sample data and processed it successfully.
 - Generated benchmark reports with per-panel timings, CPU samples, VRAM samples, and model load timings.
 
+## Robustness improvements
+
+- Added multi-character instance handling so panels can export `character_001`, `character_002`, and later instances independently.
+- Added overlap/ambiguous-pixel metadata so intersecting masks are preserved and reported instead of silently merged.
+- Added partial-body metadata with `Visible`, `Occluded`, `Out of Frame`, and `Unknown` statuses and confidence scores.
+- Changed body-part export to skip empty/invented PNGs and record missing anatomy in `metadata.json`.
+- Added incomplete-rig support and tests for partial close-ups plus multiple characters in one panel.
+

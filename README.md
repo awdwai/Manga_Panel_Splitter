@@ -105,8 +105,9 @@ output/
       character_mask.png
     speech/
     effects/
-    character_01/
+    character_001/
       character.png
+      metadata.json
       head.png
       hair.png
       torso.png

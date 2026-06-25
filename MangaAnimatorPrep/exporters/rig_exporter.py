@@ -14,6 +14,7 @@ class RigExporter:
     def export(self, path: Path, body_parts: list[BodyPartLayer], keypoints: list[PoseKeypoint]) -> None:
         payload = {
             "schema_version": "1.0",
+            "incomplete_rig": len(body_parts) < 15,
             "keypoints": [keypoint.to_dict() for keypoint in keypoints],
             "body_parts": [
                 {
@@ -22,6 +23,8 @@ class RigExporter:
                     "bbox": part.bbox.to_dict(),
                     "pivot": {"x": part.pivot[0], "y": part.pivot[1]} if part.pivot else None,
                     "confidence": part.confidence,
+                    "status": part.status,
+                    "ambiguous_pixels": part.ambiguous_pixels,
                     "layer": f"{part.name}.png",
                 }
                 for part in body_parts

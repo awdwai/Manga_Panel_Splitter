@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import cv2
@@ -57,14 +58,19 @@ class LayerExporter:
         panel: np.ndarray,
         character_mask: np.ndarray,
         body_parts: list[BodyPartLayer],
+        metadata: dict[str, object] | None = None,
     ) -> Path:
-        char_dir = ensure_dir(panel_dir / f"character_{character_index:02d}")
+        char_dir = ensure_dir(panel_dir / f"character_{character_index:03d}")
         full_bbox = self._mask_bbox(character_mask)
         character = transparent_crop(panel, character_mask, full_bbox)
         Image.fromarray(character.astype(np.uint8), mode="RGBA").save(char_dir / "character.png")
         for part in body_parts:
+            if cv2.countNonZero(normalize_mask(part.mask)) == 0:
+                continue
             rgba = transparent_crop(panel, part.mask, part.bbox)
             Image.fromarray(rgba.astype(np.uint8), mode="RGBA").save(char_dir / f"{part.name}.png")
+        if metadata is not None:
+            (char_dir / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
         return char_dir
 
     def export_debug(

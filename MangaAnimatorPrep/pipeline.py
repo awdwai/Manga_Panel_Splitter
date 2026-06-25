@@ -122,12 +122,46 @@ class MangaAnimatorPipeline:
             for character_index, character in enumerate(characters, start=1):
                 with self.tracker.measure("character_segmentation", panel=panel_id, character=character_index):
                     char_mask = self.segmenter.segment(panel, character)
-                character_masks.append(char_mask)
+                character_masks.append(normalize_mask(char_mask))
+
+            overlap_info = self._compute_instance_overlaps(character_masks)
+            for overlap in overlap_info["pairs"]:
+                LOGGER.warning(
+                    "Ambiguous character overlap in %s: %s <-> %s confidence=%.3f pixels=%s",
+                    panel_id,
+                    overlap["character_a"],
+                    overlap["character_b"],
+                    overlap["overlap_confidence"],
+                    overlap["intersection_pixels"],
+                )
+
+            for character_index, (character, char_mask) in enumerate(zip(characters, character_masks, strict=False), start=1):
+                character_id = f"character_{character_index:03d}"
                 with self.tracker.measure("pose_estimation", panel=panel_id, character=character_index):
                     keypoints = self.pose_detector.estimate(panel, char_mask, character.bbox)
                 with self.tracker.measure("body_part_segmentation", panel=panel_id, character=character_index):
-                    body_parts = self.body_part_splitter.split(char_mask, keypoints)
-                char_dir = self.layer_exporter.export_character(panel_dir, character_index, panel, char_mask, body_parts)
+                    body_parts, body_metadata = self.body_part_splitter.analyze(
+                        char_mask,
+                        keypoints,
+                        panel=panel,
+                        ambiguous_mask=overlap_info["ambiguous_masks"][character_index - 1],
+                    )
+                character_metadata = self._build_character_metadata(
+                    character_id,
+                    character,
+                    char_mask,
+                    body_metadata,
+                    overlap_info,
+                    character_index - 1,
+                )
+                char_dir = self.layer_exporter.export_character(
+                    panel_dir,
+                    character_index,
+                    panel,
+                    char_mask,
+                    body_parts,
+                    metadata=character_metadata,
+                )
                 self.rig_exporter.export(char_dir / "rig.json", body_parts, keypoints)
                 if character_index == 1:
                     self.rig_exporter.export(panel_dir / "rig.json", body_parts, keypoints)
@@ -167,4 +201,73 @@ class MangaAnimatorPipeline:
         for mask in masks:
             union = cv2.bitwise_or(union, normalize_mask(mask))
         return union
+
+    def _compute_instance_overlaps(self, masks: list[np.ndarray]) -> dict[str, object]:
+        if not masks:
+            return {"pairs": [], "ambiguous_masks": [], "ambiguous_union": None}
+        binary_masks = [np.where(normalize_mask(mask) > 0, 255, 0).astype(np.uint8) for mask in masks]
+        ambiguous_masks = [np.zeros_like(binary_masks[0]) for _ in binary_masks]
+        ambiguous_union = np.zeros_like(binary_masks[0])
+        pairs: list[dict[str, object]] = []
+        areas = [max(1, int(cv2.countNonZero(mask))) for mask in binary_masks]
+        for i in range(len(binary_masks)):
+            for j in range(i + 1, len(binary_masks)):
+                intersection = cv2.bitwise_and(binary_masks[i], binary_masks[j])
+                intersection_pixels = int(cv2.countNonZero(intersection))
+                if intersection_pixels == 0:
+                    continue
+                confidence = float(intersection_pixels / max(1, min(areas[i], areas[j])))
+                ambiguous_masks[i] = cv2.bitwise_or(ambiguous_masks[i], intersection)
+                ambiguous_masks[j] = cv2.bitwise_or(ambiguous_masks[j], intersection)
+                ambiguous_union = cv2.bitwise_or(ambiguous_union, intersection)
+                pairs.append(
+                    {
+                        "character_a": f"character_{i + 1:03d}",
+                        "character_b": f"character_{j + 1:03d}",
+                        "intersection_pixels": intersection_pixels,
+                        "overlap_confidence": confidence,
+                    }
+                )
+        return {"pairs": pairs, "ambiguous_masks": ambiguous_masks, "ambiguous_union": ambiguous_union}
+
+    def _build_character_metadata(
+        self,
+        character_id: str,
+        detection: Detection,
+        mask: np.ndarray,
+        body_metadata: dict[str, object],
+        overlap_info: dict[str, object],
+        character_offset: int,
+    ) -> dict[str, object]:
+        mask_binary = np.where(normalize_mask(mask) > 0, 255, 0).astype(np.uint8)
+        ambiguous_masks = overlap_info["ambiguous_masks"]
+        ambiguous_mask = ambiguous_masks[character_offset] if isinstance(ambiguous_masks, list) else np.zeros_like(mask_binary)
+        ambiguous_pixels = int(cv2.countNonZero(ambiguous_mask))
+        total_pixels = max(1, int(cv2.countNonZero(mask_binary)))
+        overlap_pairs = [
+            pair
+            for pair in overlap_info["pairs"]
+            if isinstance(pair, dict) and character_id in {pair.get("character_a"), pair.get("character_b")}
+        ]
+        warnings = list(body_metadata.get("warnings", [])) if isinstance(body_metadata.get("warnings"), list) else []
+        if ambiguous_pixels:
+            warnings.append("Character overlaps another instance; ambiguous pixels are preserved and reported.")
+        return {
+            "schema_version": "1.0",
+            "character_id": character_id,
+            "detection": {
+                "bbox": detection.bbox.to_dict(),
+                "confidence": detection.confidence,
+                "label": detection.label,
+            },
+            "mask": {
+                "total_pixels": total_pixels,
+                "owned_pixels": max(0, total_pixels - ambiguous_pixels),
+                "ambiguous_pixels": ambiguous_pixels,
+                "ambiguity_ratio": float(ambiguous_pixels / total_pixels),
+            },
+            "overlaps": overlap_pairs,
+            "body": body_metadata,
+            "warnings": warnings,
+        }
 

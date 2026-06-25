@@ -91,6 +91,9 @@ class BodyPartLayer:
     confidence: float
     parent: str | None = None
     pivot: tuple[float, float] | None = None
+    status: str = "Visible"
+    ambiguous_pixels: int = 0
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
