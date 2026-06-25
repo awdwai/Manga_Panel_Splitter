@@ -25,6 +25,7 @@ class SpeechDetector:
         # White interiors can merge with the page background for borderless/cropped panels,
         # so detect dark closed outlines first and then fill them as bubble masks.
         dark = cv2.threshold(gray, 120, 255, cv2.THRESH_BINARY_INV)[1]
+        dark = self._remove_border_connected(dark)
         outlined = cv2.morphologyEx(dark, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)), iterations=2)
         outline_contours, _ = cv2.findContours(outlined, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         for contour in outline_contours:
@@ -69,4 +70,21 @@ class SpeechDetector:
         inter = max(0, x2 - x1) * max(0, y2 - y1)
         union = a.area + b.area - inter
         return inter / union if union else 0.0
+
+    @staticmethod
+    def _remove_border_connected(mask: np.ndarray) -> np.ndarray:
+        """Remove panel frames and other ink connected to the crop border."""
+
+        cleaned = mask.copy()
+        count, labels, _, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        if count <= 1:
+            return cleaned
+        border_labels = set(np.unique(labels[0, :]))
+        border_labels.update(np.unique(labels[-1, :]))
+        border_labels.update(np.unique(labels[:, 0]))
+        border_labels.update(np.unique(labels[:, -1]))
+        for label in border_labels:
+            if label != 0:
+                cleaned[labels == label] = 0
+        return cleaned
 
