@@ -13,13 +13,13 @@ These items are not blockers for the currently working fallback pipeline, but th
 | OpenPose fallback | Partial | MediaPipe/geometric fallback works; OpenPose model loading is not implemented. |
 | Full automated checkpoint download | Partial | Large/licensed model artifacts are not downloaded automatically. Cache setup and checksum reporting are implemented. |
 | Semantic body-part segmentation | Partial | Automatic geometric slicing has been disabled; approved semantic/correction masks are required before body-part PNG export. |
-| Full brush-mask editor | Partial | GUI exposes correction actions and editable overlays, but a production paint/mask editor is still needed. |
+| Production boundary editor handles | Partial | GUI supports selected-part boxes, numeric boundary editing, edge snapping, and per-part resegmentation; full transform handles can be refined further. |
 
 ## Accuracy limitations
 
 - Borderless/irregular panel detection uses heuristics and may need additional training/model logic for difficult production pages.
 - Character detection fallback is silhouette/ink-blob based and can confuse dense backgrounds with characters.
-- Body-part splitting uses visible mask geometry and pose points; it correctly avoids inventing hidden anatomy but is less accurate than a trained human parsing model.
+- Body-part export is approval-gated and table-driven; without approved semantic masks it records missing/unknown parts instead of inventing anatomy.
 - Speech/text/effects detection use OpenCV heuristics and may need OCR or specialized detectors for complex pages.
 
 ## Environment limitations found during QA

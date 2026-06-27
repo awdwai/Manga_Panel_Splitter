@@ -102,17 +102,17 @@ Body-part PNGs are not generated from geometric slicing. If approved semantic/co
 masks are not available, the app exports `character.png`, `metadata.json`, and an incomplete
 `rig.json` with `body_part_masks_not_approved` statuses instead of fabricating anatomy.
 
-## Interactive segmentation editor
+## Body-part review table
 
-The PySide6 GUI includes a click-to-segment editing dock:
+The GUI uses a table-based review workflow for speed:
 
-- left click: positive prompt / add to current selection
-- right click: negative prompt / remove from current selection
-- New Object: start an independent mask layer
-- automatic label suggestions for heads, hair, speech bubbles, background, weapons, clothing, and accessories
-- layer tree with rename, reorder, duplicate, merge, hide/show, lock-ready state, and delete operations
-- editing tools: brush, erase, rectangle select, polygon-lasso scaffold, magic-wand/flood-fill click prompts, smooth, expand, contract, fill holes, and feather edges
-- pivot tree and simple live preview action buttons for layer rotation/translation/scale checks
+- sortable/searchable/filterable body-part table
+- columns for part name, status, confidence, visible state, bounding box, and action
+- selecting a row highlights and centers that part in the image viewer
+- Edit/Create opens a movable bounding box with corner handles and numeric controls
+- Snap to Edges adjusts the selected boundary to nearby detected edges
+- Auto Resegment updates only the selected body-part layer inside the edited box
+- fixed bottom toolbar keeps Previous, Redo Detection, Accept, Next, Export, and Cancel visible while scrolling
 
 ## Output structure
 

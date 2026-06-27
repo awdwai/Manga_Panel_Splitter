@@ -11,8 +11,8 @@ The production deep-learning backends are **partial** because they require exter
 | Module | Status | Notes |
 |---|---|---|
 | `MangaAnimatorPrep/main.py` | Working | CLI supports `process`, `benchmark`, `system-info`, and `gui`. |
-| `MangaAnimatorPrep/gui.py` | Partial | PySide6 GUI provides dockable panels, dark theme, image viewer, project explorer, properties, processing console, progress bar, settings dialog, panel/character detection controls, approval controls, and editable preview overlays. Brush-mask editing is scaffolded but not a full paint engine yet. |
-| `MangaAnimatorPrep/interactive_segmentation.py` | Partial | Provides local click-to-segment prompts, positive/negative refinement, independent layers, label suggestions, mask editing operations, pivots, and layer operations. It is SAM-inspired but not a real SAM2 model backend. |
+| `MangaAnimatorPrep/gui.py` | Partial | PySide6 GUI provides dockable panels, dark theme, large image viewer, project explorer, properties, processing console, progress bar, settings dialog, panel/character detection controls, approval controls, fixed bottom toolbar, and a searchable/sortable body-part review table with selected-part boundary editing. |
+| `MangaAnimatorPrep/interactive_segmentation.py` | Partial | Retained as non-exposed support code for bounded layer resegmentation experiments. The current GUI review workflow does not expose brush/freehand/manual paint masking. |
 | `MangaAnimatorPrep/config.py` | Working | Environment overrides and validated nested JSON loading work. |
 | `MangaAnimatorPrep/pipeline.py` | Working | End-to-end orchestration, reports, debug exports, and batch image processing work. |
 | `detectors/panel_detector.py` | Working | Detects synthetic rectangular panels and falls back to full image when none are found. |

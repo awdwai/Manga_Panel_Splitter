@@ -49,18 +49,27 @@ def test_gui_detection_controls_preview_and_approval(tmp_path: Path) -> None:
     app.processEvents()
 
 
-def test_gui_interactive_segmentation_layer_tree(tmp_path: Path) -> None:
+def test_gui_body_part_table_and_boundary_editor(tmp_path: Path) -> None:
     app = _ensure_app()
     sample = tmp_path / "sample.png"
     create_sample(sample)
     window = MangaAnimatorPrepMainWindow()
     assert window.load_image_path(sample) is True
+    assert window.body_part_table.rowCount() >= 10
+    window.body_part_search.setText("Head")
+    window._filter_body_part_table()
+    visible_rows = [row for row in range(window.body_part_table.rowCount()) if not window.body_part_table.isRowHidden(row)]
+    assert visible_rows
+    window.body_part_table.selectRow(visible_rows[0])
+    window._edit_body_part("Head")
+    window.part_x_spin.setValue(20)
+    window.part_y_spin.setValue(20)
+    window.part_w_spin.setValue(40)
+    window.part_h_spin.setValue(50)
+    window._auto_resegment_selected_part()
+    assert window.body_part_state["Head"]["status"] == "Visible"
     assert window.segmentation_session is not None
-    window.segmentation_session.new_layer_from_click(100, 100)
-    window._refresh_segmentation_overlays()
-    window._refresh_layer_tree()
-    assert window.layer_tree.topLevelItemCount() == 1
-    assert window.segmentation_overlay_items
+    assert any(layer.label == "Head" for layer in window.segmentation_session.layers)
     window.close()
     app.processEvents()
 

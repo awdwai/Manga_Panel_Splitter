@@ -6,10 +6,11 @@ import os
 from pathlib import Path
 from typing import Any
 
+import cv2
 import numpy as np
 
 from MangaAnimatorPrep.config import load_config
-from MangaAnimatorPrep.interactive_segmentation import InteractiveSegmentationSession
+from MangaAnimatorPrep.interactive_segmentation import InteractiveSegmentationSession, MaskLayer
 from MangaAnimatorPrep.pipeline import MangaAnimatorPipeline
 from MangaAnimatorPrep.types import BoundingBox, Detection
 from MangaAnimatorPrep.workflow import DetectionSession, DetectionWorkflow, PanelDraft
@@ -132,6 +133,10 @@ class MangaAnimatorPrepMainWindow:
         self.segmentation_session: InteractiveSegmentationSession | None = None
         self.interactive_segmentation_enabled = False
         self._brush_erase = False
+        self.body_part_rect: Any | None = None
+        self.body_part_handle_items: list[Any] = []
+        self.selected_body_part: str | None = None
+        self.body_part_state: dict[str, dict[str, object]] = {}
 
         self.window = QtWidgets.QMainWindow()
         self.window.setWindowTitle("MangaAnimatorPrep")
@@ -146,6 +151,7 @@ class MangaAnimatorPrepMainWindow:
         self._build_actions()
         self._build_docks()
         self._build_status_bar()
+        self._build_bottom_toolbar()
         self._log("PySide6 GUI ready.")
         self._original_viewport_mouse_press = self.image_view.viewport().mousePressEvent
         self.image_view.viewport().mousePressEvent = self._image_mouse_press_event  # type: ignore[method-assign]
@@ -260,7 +266,7 @@ class MangaAnimatorPrepMainWindow:
 
     def _build_docks(self) -> None:
         self._build_detection_controls()
-        self._build_interactive_segmentation_controls()
+        self._build_body_part_review_controls()
 
         self.project_tree = self.QtWidgets.QTreeWidget()
         self.project_tree.setHeaderLabels(["Project Explorer"])
@@ -275,58 +281,78 @@ class MangaAnimatorPrepMainWindow:
         self.console.setReadOnly(True)
         self._add_dock("Processing Console", self.console, self.QtCore.Qt.BottomDockWidgetArea)
 
-    def _build_interactive_segmentation_controls(self) -> None:
+    def _build_bottom_toolbar(self) -> None:
+        toolbar = self.QtWidgets.QToolBar("Review Workflow")
+        toolbar.setMovable(False)
+        self.window.addToolBar(self.QtCore.Qt.BottomToolBarArea, toolbar)
+        for label, handler in [
+            ("Previous", lambda: self._log("Previous stage")),
+            ("Redo Detection", self._run_detection_preview),
+            ("Accept", self._accept_current_stage),
+            ("Next", lambda: self._log("Next stage")),
+            ("Export", lambda: self._start_processing(False)),
+            ("Cancel", self.window.close),
+        ]:
+            action = self.QtGui.QAction(label, self.window)
+            action.triggered.connect(handler)
+            toolbar.addAction(action)
+
+    def _build_body_part_review_controls(self) -> None:
         panel = self.QtWidgets.QWidget()
         layout = self.QtWidgets.QVBoxLayout(panel)
 
-        self.interactive_segmentation_checkbox = self.QtWidgets.QCheckBox("Enable Click-to-Segment")
-        self.interactive_segmentation_checkbox.toggled.connect(self._toggle_interactive_segmentation)
-        self.layer_label_edit = self.QtWidgets.QLineEdit()
-        self.layer_label_edit.setPlaceholderText("Layer label")
-        self.layer_label_edit.editingFinished.connect(self._rename_active_layer)
+        search_row = self.QtWidgets.QHBoxLayout()
+        self.body_part_search = self.QtWidgets.QLineEdit()
+        self.body_part_search.setPlaceholderText("Search parts...")
+        self.body_part_search.textChanged.connect(self._filter_body_part_table)
+        self.body_part_filter = self.QtWidgets.QComboBox()
+        self.body_part_filter.addItems(["All", "Visible", "Partial", "Missing", "Needs Review"])
+        self.body_part_filter.currentTextChanged.connect(lambda _text: self._filter_body_part_table())
+        search_row.addWidget(self.body_part_search, 1)
+        search_row.addWidget(self.body_part_filter)
 
-        button_row = self.QtWidgets.QHBoxLayout()
-        new_button = self.QtWidgets.QPushButton("New Object")
-        new_button.clicked.connect(self._new_segmentation_object)
-        duplicate_button = self.QtWidgets.QPushButton("Duplicate")
-        duplicate_button.clicked.connect(self._duplicate_active_layer)
-        delete_button = self.QtWidgets.QPushButton("Delete")
-        delete_button.clicked.connect(self._delete_active_layer)
-        merge_button = self.QtWidgets.QPushButton("Merge Selected")
-        merge_button.clicked.connect(self._merge_selected_layers)
-        for button in [new_button, duplicate_button, delete_button, merge_button]:
-            button_row.addWidget(button)
+        self.body_part_table = self.QtWidgets.QTableWidget(0, 6)
+        self.body_part_table.setHorizontalHeaderLabels(["Part Name", "Status", "Confidence", "Visible", "Bounding Box", "Actions"])
+        self.body_part_table.setSortingEnabled(True)
+        self.body_part_table.setSelectionBehavior(self.QtWidgets.QAbstractItemView.SelectRows)
+        self.body_part_table.setEditTriggers(self.QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.body_part_table.verticalHeader().setVisible(False)
+        self.body_part_table.horizontalHeader().setStretchLastSection(True)
+        self.body_part_table.itemSelectionChanged.connect(self._body_part_selection_changed)
 
-        tool_group = self.QtWidgets.QGroupBox("Mask Editing Tools")
-        tool_layout = self.QtWidgets.QGridLayout(tool_group)
-        self.brush_size_spin = self.QtWidgets.QSpinBox()
-        self.brush_size_spin.setRange(1, 128)
-        self.brush_size_spin.setValue(16)
-        tools = [
-            ("Brush", lambda: self._set_brush_mode(False)),
-            ("Erase", lambda: self._set_brush_mode(True)),
-            ("Polygon Lasso", lambda: self._log("Polygon lasso: click support is scaffolded; use mask actions for now.")),
-            ("Rectangle Select", self._rectangle_select_active),
-            ("Magic Wand", lambda: self._log("Magic wand: click on image while Click-to-Segment is enabled.")),
-            ("Flood Fill", lambda: self._log("Flood fill uses click prompts in Click-to-Segment mode.")),
-            ("Smooth Mask", self._smooth_active_layer),
-            ("Expand Mask", self._expand_active_layer),
-            ("Contract Mask", self._contract_active_layer),
-            ("Fill Holes", self._fill_holes_active_layer),
-            ("Feather Edges", self._feather_active_layer),
-        ]
-        tool_layout.addWidget(self.QtWidgets.QLabel("Brush Size"), 0, 0)
-        tool_layout.addWidget(self.brush_size_spin, 0, 1)
-        for index, (label, handler) in enumerate(tools, start=1):
+        boundary_group = self.QtWidgets.QGroupBox("Selected Part Boundary")
+        boundary_layout = self.QtWidgets.QGridLayout(boundary_group)
+        self.part_x_spin = self._make_boundary_spin()
+        self.part_y_spin = self._make_boundary_spin()
+        self.part_w_spin = self._make_boundary_spin()
+        self.part_h_spin = self._make_boundary_spin()
+        self.part_rotation_spin = self.QtWidgets.QDoubleSpinBox()
+        self.part_rotation_spin.setRange(-180.0, 180.0)
+        self.part_rotation_spin.setSuffix(" deg")
+        for index, (label, widget) in enumerate(
+            [
+                ("X", self.part_x_spin),
+                ("Y", self.part_y_spin),
+                ("W", self.part_w_spin),
+                ("H", self.part_h_spin),
+                ("Rotate", self.part_rotation_spin),
+            ]
+        ):
+            boundary_layout.addWidget(self.QtWidgets.QLabel(label), index // 2, (index % 2) * 2)
+            boundary_layout.addWidget(widget, index // 2, (index % 2) * 2 + 1)
+        for label, handler in [
+            ("Edit", self._edit_selected_body_part),
+            ("Apply Boundary", self._apply_selected_boundary),
+            ("Snap to Edges", self._snap_selected_part_to_edges),
+            ("Auto Resegment", self._auto_resegment_selected_part),
+        ]:
             button = self.QtWidgets.QPushButton(label)
             button.clicked.connect(handler)
-            tool_layout.addWidget(button, index // 2, index % 2)
+            boundary_layout.addWidget(button, boundary_layout.rowCount(), 0, 1, 4)
 
         self.layer_tree = self.QtWidgets.QTreeWidget()
-        self.layer_tree.setHeaderLabels(["Animation Layer Editor"])
+        self.layer_tree.setHeaderLabels(["Layer Tree"])
         self.layer_tree.setDragDropMode(self.QtWidgets.QAbstractItemView.InternalMove)
-        self.layer_tree.itemChanged.connect(self._layer_tree_item_changed)
-        self.layer_tree.itemSelectionChanged.connect(self._layer_tree_selection_changed)
 
         self.pivot_tree = self.QtWidgets.QTreeWidget()
         self.pivot_tree.setHeaderLabels(["Pivot", "X", "Y"])
@@ -338,14 +364,14 @@ class MangaAnimatorPrepMainWindow:
             button.clicked.connect(lambda _checked=False, text=label: self._log(f"Preview action: {text}"))
             preview_layout.addWidget(button, index // 2, index % 2)
 
-        layout.addWidget(self.interactive_segmentation_checkbox)
-        layout.addWidget(self.layer_label_edit)
-        layout.addLayout(button_row)
-        layout.addWidget(tool_group)
-        layout.addWidget(self.layer_tree)
-        layout.addWidget(self.pivot_tree)
+        layout.addLayout(search_row)
+        layout.addWidget(self.body_part_table, 3)
+        layout.addWidget(boundary_group)
+        layout.addWidget(self.layer_tree, 1)
+        layout.addWidget(self.pivot_tree, 1)
         layout.addWidget(preview_group)
-        self._add_dock("Interactive AI Segmentation", panel, self.QtCore.Qt.RightDockWidgetArea)
+        self._populate_body_part_table()
+        self._add_dock("Body Part Review", panel, self.QtCore.Qt.RightDockWidgetArea)
 
     def _build_detection_controls(self) -> None:
         panel = self.QtWidgets.QWidget()
@@ -401,7 +427,7 @@ class MangaAnimatorPrepMainWindow:
             "Delete Character",
             "Split Character Mask",
             "Merge Character Masks",
-            "Brush Correction Mask",
+            "Edit Selected Boundary",
         ]
         for index, label in enumerate(labels):
             button = self.QtWidgets.QPushButton(label)
@@ -678,9 +704,8 @@ class MangaAnimatorPrepMainWindow:
             self._add_manual_character()
         elif action == "Delete Character":
             self._delete_selected_overlays("character")
-        elif action == "Brush Correction Mask":
-            self.brush_correction_enabled = not self.brush_correction_enabled
-            self._log(f"Brush correction mode {'enabled' if self.brush_correction_enabled else 'disabled'}.")
+        elif action == "Edit Selected Boundary":
+            self._edit_selected_body_part()
         else:
             self._log(f"{action}: select overlays in preview; current operation is recorded for manual correction.")
         self.detections_approved = False
@@ -728,6 +753,252 @@ class MangaAnimatorPrepMainWindow:
                 self.overlay_items.remove(item)
         self._log(f"Deleted {len(selected)} selected {item_type} overlay(s).")
 
+    def _make_boundary_spin(self) -> Any:
+        spin = self.QtWidgets.QSpinBox()
+        spin.setRange(0, 100000)
+        spin.valueChanged.connect(lambda _value: self._preview_selected_boundary())
+        return spin
+
+    def _populate_body_part_table(self) -> None:
+        self.body_part_table.setSortingEnabled(False)
+        self.body_part_table.setRowCount(0)
+        defaults = [
+            "Head",
+            "Hair",
+            "Eyes",
+            "Mouth",
+            "Neck",
+            "Torso",
+            "Left Upper Arm",
+            "Left Lower Arm",
+            "Left Hand",
+            "Right Upper Arm",
+            "Right Lower Arm",
+            "Right Hand",
+            "Left Upper Leg",
+            "Left Lower Leg",
+            "Left Foot",
+            "Right Upper Leg",
+            "Right Lower Leg",
+            "Right Foot",
+            "Clothing",
+            "Weapon",
+            "Accessory",
+        ]
+        for part in defaults:
+            self.body_part_state.setdefault(
+                part,
+                {"status": "Missing", "confidence": None, "visible": "No", "bbox": None, "rotation": 0.0},
+            )
+            self._add_body_part_row(part)
+        self.body_part_table.setSortingEnabled(True)
+        self._filter_body_part_table()
+
+    def _add_body_part_row(self, part: str) -> None:
+        state = self.body_part_state[part]
+        row = self.body_part_table.rowCount()
+        self.body_part_table.insertRow(row)
+        status = str(state["status"])
+        confidence = state["confidence"]
+        confidence_text = "Missing" if confidence is None else f"{float(confidence) * 100:.0f}%"
+        bbox = state["bbox"]
+        bbox_text = "---" if bbox is None else f"({bbox.x},{bbox.y},{bbox.width},{bbox.height})"
+        status_icon = "✓" if status == "Visible" else "⚠" if status in {"Partial", "Needs Review"} else "✗"
+        values = [part, status_icon, confidence_text, str(state["visible"]), bbox_text]
+        for col, value in enumerate(values):
+            item = self.QtWidgets.QTableWidgetItem(value)
+            item.setData(self.QtCore.Qt.UserRole, part)
+            if status in {"Partial", "Needs Review"}:
+                item.setBackground(self.QtGui.QColor("#7c5f00"))
+            elif status == "Missing":
+                item.setBackground(self.QtGui.QColor("#3a1f1f"))
+            self.body_part_table.setItem(row, col, item)
+        action_button = self.QtWidgets.QPushButton("Create" if bbox is None else "Edit")
+        action_button.clicked.connect(lambda _checked=False, name=part: self._edit_body_part(name))
+        self.body_part_table.setCellWidget(row, 5, action_button)
+
+    def _filter_body_part_table(self) -> None:
+        if not hasattr(self, "body_part_table"):
+            return
+        query = self.body_part_search.text().strip().lower() if hasattr(self, "body_part_search") else ""
+        filter_value = self.body_part_filter.currentText() if hasattr(self, "body_part_filter") else "All"
+        for row in range(self.body_part_table.rowCount()):
+            name_item = self.body_part_table.item(row, 0)
+            if name_item is None:
+                continue
+            part = str(name_item.data(self.QtCore.Qt.UserRole))
+            state = self.body_part_state.get(part, {})
+            matches_query = query in part.lower()
+            status = state.get("status")
+            matches_filter = (
+                filter_value == "All"
+                or filter_value == status
+                or (filter_value == "Needs Review" and status in {"Partial", "Needs Review"})
+            )
+            self.body_part_table.setRowHidden(row, not (matches_query and matches_filter))
+
+    def _body_part_selection_changed(self) -> None:
+        selected = self.body_part_table.selectedItems()
+        if not selected:
+            return
+        part = str(selected[0].data(self.QtCore.Qt.UserRole))
+        self.selected_body_part = part
+        self._load_part_boundary_controls(part)
+        self._highlight_body_part(part)
+
+    def _load_part_boundary_controls(self, part: str) -> None:
+        state = self.body_part_state.get(part, {})
+        bbox = state.get("bbox")
+        if bbox is None:
+            bbox = self._default_body_part_bbox()
+        assert isinstance(bbox, BoundingBox)
+        self.part_x_spin.blockSignals(True)
+        self.part_y_spin.blockSignals(True)
+        self.part_w_spin.blockSignals(True)
+        self.part_h_spin.blockSignals(True)
+        self.part_rotation_spin.blockSignals(True)
+        self.part_x_spin.setValue(bbox.x)
+        self.part_y_spin.setValue(bbox.y)
+        self.part_w_spin.setValue(bbox.width)
+        self.part_h_spin.setValue(bbox.height)
+        self.part_rotation_spin.setValue(float(state.get("rotation", 0.0)))
+        self.part_x_spin.blockSignals(False)
+        self.part_y_spin.blockSignals(False)
+        self.part_w_spin.blockSignals(False)
+        self.part_h_spin.blockSignals(False)
+        self.part_rotation_spin.blockSignals(False)
+
+    def _default_body_part_bbox(self) -> BoundingBox:
+        rect = self.image_scene.sceneRect()
+        width = max(20, int(rect.width() * 0.18))
+        height = max(20, int(rect.height() * 0.18))
+        return BoundingBox(int(rect.center().x() - width / 2), int(rect.center().y() - height / 2), width, height)
+
+    def _current_boundary_bbox(self) -> BoundingBox:
+        return BoundingBox(
+            self.part_x_spin.value(),
+            self.part_y_spin.value(),
+            max(1, self.part_w_spin.value()),
+            max(1, self.part_h_spin.value()),
+        )
+
+    def _highlight_body_part(self, part: str) -> None:
+        state = self.body_part_state.get(part, {})
+        bbox = state.get("bbox") or self._default_body_part_bbox()
+        assert isinstance(bbox, BoundingBox)
+        self._draw_body_part_rect(part, bbox, float(state.get("rotation", 0.0)))
+        self.image_view.centerOn(bbox.x + bbox.width / 2, bbox.y + bbox.height / 2)
+
+    def _draw_body_part_rect(self, part: str, bbox: BoundingBox, rotation: float = 0.0) -> None:
+        if self.body_part_rect is not None:
+            self.image_scene.removeItem(self.body_part_rect)
+        for handle in self.body_part_handle_items:
+            self.image_scene.removeItem(handle)
+        self.body_part_handle_items.clear()
+        pen = self.QtGui.QPen(self.QtGui.QColor("#00e5ff"), 3)
+        self.body_part_rect = self.image_scene.addRect(bbox.x, bbox.y, bbox.width, bbox.height, pen)
+        self.body_part_rect.setFlag(self.QtWidgets.QGraphicsItem.ItemIsMovable, True)
+        self.body_part_rect.setFlag(self.QtWidgets.QGraphicsItem.ItemIsSelectable, True)
+        self.body_part_rect.setTransformOriginPoint(bbox.x + bbox.width / 2, bbox.y + bbox.height / 2)
+        self.body_part_rect.setRotation(rotation)
+        label = self.image_scene.addText(part)
+        label.setDefaultTextColor(self.QtGui.QColor("#00e5ff"))
+        label.setPos(bbox.x, max(0, bbox.y - 24))
+        self.body_part_handle_items.append(label)
+        for x, y in [(bbox.x, bbox.y), (bbox.x2, bbox.y), (bbox.x, bbox.y2), (bbox.x2, bbox.y2)]:
+            handle = self.image_scene.addEllipse(x - 4, y - 4, 8, 8, self.QtGui.QPen(self.QtGui.QColor("#00e5ff")), self.QtGui.QBrush(self.QtGui.QColor("#00e5ff")))
+            handle.setFlag(self.QtWidgets.QGraphicsItem.ItemIsMovable, True)
+            self.body_part_handle_items.append(handle)
+
+    def _preview_selected_boundary(self) -> None:
+        if self.selected_body_part is None or not hasattr(self, "part_x_spin"):
+            return
+        self._draw_body_part_rect(self.selected_body_part, self._current_boundary_bbox(), self.part_rotation_spin.value())
+
+    def _edit_selected_body_part(self) -> None:
+        if self.selected_body_part is not None:
+            self._edit_body_part(self.selected_body_part)
+
+    def _edit_body_part(self, part: str) -> None:
+        self.selected_body_part = part
+        self._load_part_boundary_controls(part)
+        self._highlight_body_part(part)
+        self._log(f"Editing boundary for {part}. Move/resize the box or use numeric controls.")
+
+    def _apply_selected_boundary(self) -> None:
+        if self.selected_body_part is None:
+            return
+        bbox = self._current_boundary_bbox()
+        self.body_part_state[self.selected_body_part].update(
+            {"bbox": bbox, "rotation": self.part_rotation_spin.value(), "status": "Needs Review", "confidence": 0.60, "visible": "Partial"}
+        )
+        self._rebuild_body_part_table()
+        self._highlight_body_part(self.selected_body_part)
+
+    def _snap_selected_part_to_edges(self) -> None:
+        if self.selected_body_part is None or not hasattr(self, "current_image_array"):
+            return
+        bbox = self._current_boundary_bbox().clamp(self.current_image_array.shape[1], self.current_image_array.shape[0])
+        gray = cv2.cvtColor(self.current_image_array, cv2.COLOR_RGB2GRAY)
+        crop = gray[bbox.y : bbox.y2, bbox.x : bbox.x2]
+        edges = cv2.Canny(crop, 60, 160)
+        ys, xs = np.where(edges > 0)
+        if len(xs) and len(ys):
+            snapped = BoundingBox(bbox.x + int(xs.min()), bbox.y + int(ys.min()), int(xs.max() - xs.min() + 1), int(ys.max() - ys.min() + 1))
+            self.part_x_spin.setValue(snapped.x)
+            self.part_y_spin.setValue(snapped.y)
+            self.part_w_spin.setValue(snapped.width)
+            self.part_h_spin.setValue(snapped.height)
+            self._log(f"Snapped {self.selected_body_part} boundary to detected edges.")
+
+    def _auto_resegment_selected_part(self) -> None:
+        if self.selected_body_part is None or self.segmentation_session is None:
+            return
+        bbox = self._current_boundary_bbox()
+        mask = np.zeros((int(self.image_scene.sceneRect().height()), int(self.image_scene.sceneRect().width())), dtype=np.uint8)
+        bbox = bbox.clamp(mask.shape[1], mask.shape[0])
+        mask[bbox.y : bbox.y2, bbox.x : bbox.x2] = 255
+        layer = next((entry for entry in self.segmentation_session.layers if entry.label == self.selected_body_part), None)
+        if layer is None:
+            layer = MaskLayer(f"layer_{len(self.segmentation_session.layers) + 1:03d}", self.selected_body_part, mask, 0.80)
+            self.segmentation_session.layers.append(layer)
+            self.segmentation_session.active_layer_id = layer.layer_id
+        else:
+            layer.mask = mask
+            layer.confidence = 0.80
+            self.segmentation_session.active_layer_id = layer.layer_id
+        layer.refresh_bbox()
+        self.body_part_state[self.selected_body_part].update(
+            {"bbox": bbox, "rotation": self.part_rotation_spin.value(), "status": "Visible", "confidence": 0.80, "visible": "Yes"}
+        )
+        self._rebuild_body_part_table()
+        self._refresh_segmentation_overlays()
+        self._refresh_layer_tree()
+        self._refresh_pivot_tree()
+        self._highlight_body_part(self.selected_body_part)
+        self._log(f"Auto resegmented only {self.selected_body_part} inside selected boundary.")
+
+    def _rebuild_body_part_table(self) -> None:
+        current = self.selected_body_part
+        self.body_part_table.setSortingEnabled(False)
+        self.body_part_table.setRowCount(0)
+        for part in list(self.body_part_state):
+            self._add_body_part_row(part)
+        self.body_part_table.setSortingEnabled(True)
+        self._filter_body_part_table()
+        if current:
+            self.selected_body_part = current
+
+    def _accept_current_stage(self) -> None:
+        if self.detection_session is not None and not self.detections_approved:
+            self._approve_detections()
+            return
+        if self.selected_body_part:
+            self._apply_selected_boundary()
+            self._log(f"Accepted {self.selected_body_part}.")
+        else:
+            self._log("Accepted current review stage.")
+
     def _toggle_interactive_segmentation(self, enabled: bool) -> None:
         self.interactive_segmentation_enabled = enabled
         self._log("Click-to-segment enabled. Left click adds positive prompts; right click adds negative prompts." if enabled else "Click-to-segment disabled.")
@@ -744,7 +1015,7 @@ class MangaAnimatorPrepMainWindow:
             self._refresh_segmentation_overlays()
             self._refresh_layer_tree()
             self._refresh_pivot_tree()
-            self._log(("Erased" if erase else "Painted") + f" mask at ({x}, {y}).")
+            self._log(("Removed from" if erase else "Updated") + f" selected layer at ({x}, {y}).")
             return
         if event.button() == self.QtCore.Qt.LeftButton:
             layer = self.segmentation_session.add_prompt(x, y, positive=True)
@@ -835,7 +1106,7 @@ class MangaAnimatorPrepMainWindow:
         self.interactive_segmentation_enabled = True
         self.interactive_segmentation_checkbox.setChecked(True)
         self.brush_correction_enabled = True
-        self._log("Erase brush active." if erase else "Brush add mode active.")
+        self._log("Boundary subtraction mode active." if erase else "Boundary add mode active.")
         self._brush_erase = erase
 
     def _rectangle_select_active(self) -> None:
