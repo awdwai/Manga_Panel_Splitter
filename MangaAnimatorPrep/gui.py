@@ -375,9 +375,12 @@ class MangaAnimatorPrepMainWindow:
 
     def _build_detection_controls(self) -> None:
         panel = self.QtWidgets.QWidget()
+        panel.setSizePolicy(self.QtWidgets.QSizePolicy.Expanding, self.QtWidgets.QSizePolicy.Expanding)
         layout = self.QtWidgets.QVBoxLayout(panel)
+        layout.setContentsMargins(6, 6, 6, 6)
 
         panel_group = self.QtWidgets.QGroupBox("Panel Detection")
+        panel_group.setSizePolicy(self.QtWidgets.QSizePolicy.Expanding, self.QtWidgets.QSizePolicy.Maximum)
         panel_layout = self.QtWidgets.QFormLayout(panel_group)
         self.auto_panels_checkbox = self.QtWidgets.QCheckBox("Automatically Detect Panels")
         self.auto_panels_checkbox.setChecked(True)
@@ -397,6 +400,7 @@ class MangaAnimatorPrepMainWindow:
         panel_layout.addRow("Expected Number of Panels", slider_row)
 
         char_group = self.QtWidgets.QGroupBox("Character Detection")
+        char_group.setSizePolicy(self.QtWidgets.QSizePolicy.Expanding, self.QtWidgets.QSizePolicy.Maximum)
         char_layout = self.QtWidgets.QFormLayout(char_group)
         self.expected_characters_default = self.QtWidgets.QSpinBox()
         self.expected_characters_default.setRange(0, 10)
@@ -405,17 +409,25 @@ class MangaAnimatorPrepMainWindow:
         char_layout.addRow("Default Expected Characters", self.expected_characters_default)
 
         review_group = self.QtWidgets.QGroupBox("Detection Review")
+        review_group.setSizePolicy(self.QtWidgets.QSizePolicy.Expanding, self.QtWidgets.QSizePolicy.Expanding)
         review_layout = self.QtWidgets.QVBoxLayout(review_group)
+        review_layout.setContentsMargins(6, 6, 6, 6)
         self.preview_stage_combo = self.QtWidgets.QComboBox()
         self.preview_stage_combo.addItems(["Original", "Detected Panels", "Detected Characters", "Detected Body Parts", "Background", "Masks"])
         self.preview_stage_combo.currentTextChanged.connect(lambda _value: self._refresh_detection_review())
         self.detection_review_table = self.QtWidgets.QTableWidget(0, 5)
+        self.detection_review_table.setSizePolicy(self.QtWidgets.QSizePolicy.Expanding, self.QtWidgets.QSizePolicy.Expanding)
+        self.detection_review_table.setMinimumHeight(220)
+        self.detection_review_table.setVerticalScrollBarPolicy(self.QtCore.Qt.ScrollBarAsNeeded)
+        self.detection_review_table.setHorizontalScrollBarPolicy(self.QtCore.Qt.ScrollBarAsNeeded)
+        self.detection_review_table.setSizeAdjustPolicy(self.QtWidgets.QAbstractScrollArea.AdjustIgnored)
         self.detection_review_table.setHorizontalHeaderLabels(["Type", "ID", "Confidence", "Status", "Expected Characters"])
         self.detection_review_table.horizontalHeader().setStretchLastSection(True)
         review_layout.addWidget(self.preview_stage_combo)
-        review_layout.addWidget(self.detection_review_table)
+        review_layout.addWidget(self.detection_review_table, 1)
 
         correction_group = self.QtWidgets.QGroupBox("Interactive Correction Mode")
+        correction_group.setSizePolicy(self.QtWidgets.QSizePolicy.Expanding, self.QtWidgets.QSizePolicy.Maximum)
         correction_layout = self.QtWidgets.QGridLayout(correction_group)
         labels = [
             "Add Panel",
@@ -440,14 +452,13 @@ class MangaAnimatorPrepMainWindow:
         approve_button.clicked.connect(self._approve_detections)
         self.approval_label = self.QtWidgets.QLabel("Approval required before AI body-part processing.")
 
-        layout.addWidget(panel_group)
-        layout.addWidget(char_group)
-        layout.addWidget(review_group)
-        layout.addWidget(correction_group)
-        layout.addWidget(detect_button)
-        layout.addWidget(approve_button)
-        layout.addWidget(self.approval_label)
-        layout.addStretch(1)
+        layout.addWidget(panel_group, 0)
+        layout.addWidget(char_group, 0)
+        layout.addWidget(review_group, 1)
+        layout.addWidget(correction_group, 0)
+        layout.addWidget(detect_button, 0)
+        layout.addWidget(approve_button, 0)
+        layout.addWidget(self.approval_label, 0)
         self._add_dock("Panel Detection", panel, self.QtCore.Qt.LeftDockWidgetArea)
 
     def _build_status_bar(self) -> None:

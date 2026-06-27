@@ -38,6 +38,9 @@ def test_gui_detection_controls_preview_and_approval(tmp_path: Path) -> None:
     assert window.expected_panels_slider.maximum() == 20
     assert window.expected_panels_label.text() == "Auto"
     assert window.expected_characters_default.maximum() == 10
+    assert window.detection_review_table.sizePolicy().verticalPolicy() == window.QtWidgets.QSizePolicy.Expanding
+    assert window.detection_review_table.minimumHeight() >= 220
+    assert window.detection_review_table.verticalScrollBarPolicy() == window.QtCore.Qt.ScrollBarAsNeeded
     assert window.load_image_path(sample) is True
     window._run_detection_preview()
     assert window.detection_session is not None
