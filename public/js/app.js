@@ -602,7 +602,7 @@ function renderSettings() {
       </section>
       <aside class="help-box">
         <h3>Data is saved on disk</h3>
-        <p>Every create, edit, and delete writes to <code>zuhobooks/data/db.json</code> on this machine. Restart the server anytime — your books stay put.</p>
+        <p>Every create, edit, and delete writes to <code>data/db.json</code> on this machine. Restart the server anytime — your books stay put.</p>
         <ol>
           <li>Add customers and vendors under Contacts</li>
           <li>Create invoices and record expenses</li>
