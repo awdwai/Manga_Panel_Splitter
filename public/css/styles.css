@@ -316,6 +316,10 @@ textarea {
   border-bottom: 1px solid var(--zb-line);
 }
 
+.zb-tabs[hidden] {
+  display: none !important;
+}
+
 .zb-tab {
   border: 0;
   background: transparent;
