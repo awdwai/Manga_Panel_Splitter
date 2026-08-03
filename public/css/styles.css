@@ -829,6 +829,19 @@ table.zb-table td.actions {
   text-align: left;
 }
 
+.line-items select.item-pick {
+  width: 100%;
+  border: 1px solid var(--zb-line);
+  border-radius: 4px;
+  padding: 7px 8px;
+  margin-bottom: 6px;
+  background: #fff;
+}
+
+.line-items input.item-desc {
+  margin-top: 0;
+}
+
 .totals {
   display: flex;
   justify-content: flex-end;
