@@ -111,6 +111,7 @@ for (const collection of COLLECTIONS) {
     if (num && !row.number) row.number = num;
     if (Array.isArray(body.items)) {
       row.items = body.items.map((it) => ({
+        itemId: it.itemId || null,
         description: String(it.description || ""),
         quantity: Number(it.quantity) || 0,
         rate: Number(it.rate) || 0,
@@ -130,6 +131,7 @@ for (const collection of COLLECTIONS) {
     const next = { ...prev, ...req.body, id: prev.id, number: prev.number, updatedAt: new Date().toISOString() };
     if (Array.isArray(req.body.items)) {
       next.items = req.body.items.map((it) => ({
+        itemId: it.itemId || null,
         description: String(it.description || ""),
         quantity: Number(it.quantity) || 0,
         rate: Number(it.rate) || 0,

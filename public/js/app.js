@@ -352,7 +352,13 @@ async function refresh() {
   const mod = MODULES[state.view];
   if (mod?.collection) await loadCollection(mod.collection);
   // Prefetch parties for forms
-  await Promise.all([loadCollection("customers"), loadCollection("vendors"), loadCollection("projects"), loadCollection("bankAccounts")]);
+  await Promise.all([
+    loadCollection("customers"),
+    loadCollection("vendors"),
+    loadCollection("projects"),
+    loadCollection("bankAccounts"),
+    loadCollection("items"),
+  ]);
   if (state.view === "banking") {
     await loadCollection("bankTransactions");
   }
@@ -796,29 +802,65 @@ function options(list, selected, placeholder) {
   ].join("");
 }
 
-function lineItemsHtml(items) {
-  const rows = (items?.length ? items : [{ description: "", quantity: 1, rate: 0 }])
-    .map(
-      (it) => `<tr>
-      <td><input name="desc" value="${esc(it.description)}" /></td>
+function itemSelectOptions(selectedId) {
+  const items = state.cache.items || [];
+  const opts = [`<option value="">Select an item</option>`];
+  for (const item of items) {
+    const label = item.sku ? `${item.name} (${item.sku})` : item.name;
+    opts.push(
+      `<option value="${esc(item.id)}" data-rate="${esc(item.rate)}" data-name="${esc(item.name)}" data-desc="${esc(item.description || item.name)}" ${item.id === selectedId ? "selected" : ""}>${esc(label)}</option>`
+    );
+  }
+  opts.push(`<option value="__custom__">— Type a custom item —</option>`);
+  return opts.join("");
+}
+
+function lineRowHtml(it = {}) {
+  return `<tr>
+      <td>
+        <select name="itemId" class="item-pick">${itemSelectOptions(it.itemId)}</select>
+        <input name="desc" class="item-desc" value="${esc(it.description || "")}" placeholder="Item details" />
+      </td>
       <td style="width:90px"><input name="qty" type="number" min="0" step="1" value="${it.quantity ?? 1}" /></td>
       <td style="width:110px"><input name="rate" type="number" min="0" step="0.01" value="${it.rate ?? 0}" /></td>
       <td style="width:40px"><button type="button" class="btn btn-ghost btn-sm" data-rm-line>×</button></td>
-    </tr>`
-    )
-    .join("");
-  return `<div class="line-items"><table><thead><tr><th>Item Details</th><th>Qty</th><th>Rate</th><th></th></tr></thead>
+    </tr>`;
+}
+
+function lineItemsHtml(items) {
+  const catalog = state.cache.items || [];
+  const rows = (items?.length ? items : [{ description: "", quantity: 1, rate: 0 }]).map((it) => lineRowHtml(it)).join("");
+  const hint = catalog.length
+    ? `<div class="help-text" style="margin:6px 0 10px">Pick from your <strong>Items</strong> catalog (${catalog.length} item${catalog.length === 1 ? "" : "s"}) — rate and description fill in automatically.</div>`
+    : `<div class="help-text" style="margin:6px 0 10px">No items yet. Add products/services under <strong>Items</strong>, then they will show up here.</div>`;
+  return `${hint}<div class="line-items"><table><thead><tr><th>Item Details</th><th>Qty</th><th>Rate</th><th></th></tr></thead>
     <tbody id="line-body">${rows}</tbody></table></div>
     <button type="button" class="btn btn-ghost btn-sm" id="add-line">+ Add New Row</button>
     <div class="totals"><div class="box"><span>Total</span><span id="line-total">${money(0)}</span></div></div>`;
 }
 
 function readLines() {
-  return [...document.querySelectorAll("#line-body tr")].map((tr) => ({
-    description: tr.querySelector('[name="desc"]').value,
-    quantity: Number(tr.querySelector('[name="qty"]').value) || 0,
-    rate: Number(tr.querySelector('[name="rate"]').value) || 0,
-  }));
+  return [...document.querySelectorAll("#line-body tr")].map((tr) => {
+    const itemIdRaw = tr.querySelector('[name="itemId"]')?.value || "";
+    const itemId = itemIdRaw && itemIdRaw !== "__custom__" ? itemIdRaw : null;
+    return {
+      itemId,
+      description: tr.querySelector('[name="desc"]').value,
+      quantity: Number(tr.querySelector('[name="qty"]').value) || 0,
+      rate: Number(tr.querySelector('[name="rate"]').value) || 0,
+    };
+  });
+}
+
+function applyItemPick(select) {
+  const tr = select.closest("tr");
+  if (!tr) return;
+  const opt = select.selectedOptions[0];
+  const desc = tr.querySelector('[name="desc"]');
+  const rate = tr.querySelector('[name="rate"]');
+  if (!opt || !select.value || select.value === "__custom__") return;
+  if (desc) desc.value = opt.dataset.desc || opt.dataset.name || "";
+  if (rate) rate.value = opt.dataset.rate || 0;
 }
 
 function bindLines() {
@@ -828,6 +870,13 @@ function bindLines() {
     if (n) n.textContent = money(t, state.organization?.currency);
   };
   el("line-body")?.addEventListener("input", upd);
+  el("line-body")?.addEventListener("change", (e) => {
+    const pick = e.target.closest("select.item-pick");
+    if (pick) {
+      applyItemPick(pick);
+      upd();
+    }
+  });
   el("line-body")?.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-rm-line]");
     if (!btn) return;
@@ -837,9 +886,7 @@ function bindLines() {
   });
   el("add-line")?.addEventListener("click", () => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td><input name="desc" /></td><td style="width:90px"><input name="qty" type="number" value="1" /></td>
-      <td style="width:110px"><input name="rate" type="number" step="0.01" value="0" /></td>
-      <td style="width:40px"><button type="button" class="btn btn-ghost btn-sm" data-rm-line>×</button></td>`;
+    tr.innerHTML = lineRowHtml({ description: "", quantity: 1, rate: 0 });
     el("line-body").appendChild(tr);
     upd();
   });
@@ -866,10 +913,13 @@ function fieldHtml(field, row) {
   return `<div class="field"><label>${esc(label)}${required ? " *" : ""}</label>${control}</div>`;
 }
 
-function openForm(mod, row = null) {
+async function openForm(mod, row = null) {
   if (mod.special === "banking" || mod.collection === "bankAccounts") {
     openBankForm(row);
     return;
+  }
+  if (mod.lineItems) {
+    await loadCollection("items");
   }
   const title = row ? `Edit ${mod.title.slice(0, -1) || mod.title}` : `New ${mod.title.endsWith("s") ? mod.title.slice(0, -1) : mod.title}`;
   const fields = mod.fields || [];
