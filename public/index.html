@@ -3,91 +3,179 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ZuhoBooks — Local Accounting</title>
+    <title>Zuho Books</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700;900&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/css/styles.css" />
   </head>
   <body>
-    <div id="app" class="app">
-      <aside class="sidebar" id="sidebar">
-        <div class="brand">
-          <div class="brand-mark" aria-hidden="true">Z</div>
-          <div class="brand-text">
-            <strong>ZuhoBooks</strong>
-            <span id="org-name-side">My Organization</span>
+    <div class="zb-app" id="app">
+      <!-- Top header — Zoho Books style -->
+      <header class="zb-topbar">
+        <div class="zb-topbar-left">
+          <button class="zb-icon-btn zb-menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+          <div class="zb-logo">
+            <span class="zb-logo-mark">B</span>
+            <span class="zb-logo-text">Zuho <strong>Books</strong></span>
           </div>
+          <button class="zb-icon-btn zb-quick-create" id="quick-create" title="Quick Create">+</button>
+          <button class="zb-icon-btn" id="recent-btn" title="Recent Activities">⏱</button>
         </div>
-
-        <nav class="nav" aria-label="Main">
-          <button class="nav-item active" data-view="dashboard">
-            <span class="nav-icon">⌂</span> Dashboard
-          </button>
-          <div class="nav-group">Sales</div>
-          <button class="nav-item" data-view="invoices">
-            <span class="nav-icon">▣</span> Invoices
-          </button>
-          <div class="nav-group">Purchases</div>
-          <button class="nav-item" data-view="expenses">
-            <span class="nav-icon">▭</span> Expenses
-          </button>
-          <button class="nav-item" data-view="bills">
-            <span class="nav-icon">▤</span> Bills
-          </button>
-          <div class="nav-group">People</div>
-          <button class="nav-item" data-view="contacts">
-            <span class="nav-icon">◎</span> Contacts
-          </button>
-          <div class="nav-group">Insights</div>
-          <button class="nav-item" data-view="reports">
-            <span class="nav-icon">▥</span> Reports
-          </button>
-          <button class="nav-item" data-view="settings">
-            <span class="nav-icon">⚙</span> Settings
-          </button>
-        </nav>
-
-        <div class="sidebar-foot">
-          <div class="persist-badge" title="Saved to local JSON file on the server">
-            <span class="dot"></span> Local save on
-          </div>
+        <div class="zb-search-wrap">
+          <span class="zb-search-icon">⌕</span>
+          <input id="global-search" class="zb-search" type="search" placeholder="Search in Zuho Books ( / )" />
         </div>
-      </aside>
+        <div class="zb-topbar-right">
+          <button class="zb-org-btn" id="org-btn">
+            <span id="org-name">Organization</span>
+            <span class="caret">▾</span>
+          </button>
+          <button class="zb-icon-btn" title="Notifications">🔔</button>
+          <button class="zb-icon-btn" id="settings-btn" title="Settings">⚙</button>
+          <button class="zb-icon-btn" title="Help">?</button>
+          <div class="zb-avatar" title="Profile">ZB</div>
+        </div>
+      </header>
 
-      <div class="main-wrap">
-        <header class="topbar">
-          <button class="menu-btn" id="menu-btn" aria-label="Toggle menu">☰</button>
-          <div class="topbar-title">
-            <h1 id="page-title">Dashboard</h1>
-            <p id="page-sub">Your business finances at a glance</p>
-          </div>
-          <div class="topbar-actions">
-            <button class="btn btn-ghost" id="btn-refresh" title="Reload data">Refresh</button>
-            <button class="btn btn-primary" id="btn-quick-create">+ New</button>
-          </div>
-        </header>
+      <div class="zb-body">
+        <!-- Left sidebar -->
+        <aside class="zb-sidebar" id="sidebar">
+          <nav class="zb-nav" id="nav">
+            <button class="zb-nav-item active" data-view="home">
+              <span class="ico">⌂</span><span>Home</span>
+            </button>
 
-        <main class="content" id="content"></main>
+            <button class="zb-nav-item" data-view="items">
+              <span class="ico">▣</span><span>Items</span>
+            </button>
+
+            <button class="zb-nav-item" data-view="banking">
+              <span class="ico">🏦</span><span>Banking</span>
+            </button>
+
+            <button class="zb-nav-group" data-group="sales">
+              <span class="ico">🛒</span><span>Sales</span><span class="chev">▸</span>
+            </button>
+            <div class="zb-sub" data-sub="sales">
+              <button class="zb-nav-item" data-view="customers">Customers</button>
+              <button class="zb-nav-item" data-view="quotes">Quotes</button>
+              <button class="zb-nav-item" data-view="retainerInvoices">Retainer Invoices</button>
+              <button class="zb-nav-item" data-view="salesOrders">Sales Orders</button>
+              <button class="zb-nav-item" data-view="invoices">Invoices</button>
+              <button class="zb-nav-item" data-view="paymentLinks">Payment Links</button>
+              <button class="zb-nav-item" data-view="paymentsReceived">Payments Received</button>
+              <button class="zb-nav-item" data-view="recurringInvoices">Recurring Invoices</button>
+              <button class="zb-nav-item" data-view="creditNotes">Credit Notes</button>
+            </div>
+
+            <button class="zb-nav-group" data-group="purchases">
+              <span class="ico">🛍</span><span>Purchases</span><span class="chev">▸</span>
+            </button>
+            <div class="zb-sub" data-sub="purchases">
+              <button class="zb-nav-item" data-view="vendors">Vendors</button>
+              <button class="zb-nav-item" data-view="expenses">Expenses</button>
+              <button class="zb-nav-item" data-view="recurringExpenses">Recurring Expenses</button>
+              <button class="zb-nav-item" data-view="purchaseOrders">Purchase Orders</button>
+              <button class="zb-nav-item" data-view="bills">Bills</button>
+              <button class="zb-nav-item" data-view="recurringBills">Recurring Bills</button>
+              <button class="zb-nav-item" data-view="paymentsMade">Payments Made</button>
+              <button class="zb-nav-item" data-view="vendorCredits">Vendor Credits</button>
+            </div>
+
+            <button class="zb-nav-group" data-group="time">
+              <span class="ico">🕒</span><span>Time Tracking</span><span class="chev">▸</span>
+            </button>
+            <div class="zb-sub" data-sub="time">
+              <button class="zb-nav-item" data-view="projects">Projects</button>
+              <button class="zb-nav-item" data-view="timesheets">Timesheet</button>
+            </div>
+
+            <button class="zb-nav-group" data-group="accountant">
+              <span class="ico">📒</span><span>Accountant</span><span class="chev">▸</span>
+            </button>
+            <div class="zb-sub" data-sub="accountant">
+              <button class="zb-nav-item" data-view="journals">Manual Journals</button>
+              <button class="zb-nav-item" data-view="bulkUpdate">Bulk Update</button>
+              <button class="zb-nav-item" data-view="chartOfAccounts">Chart of Accounts</button>
+              <button class="zb-nav-item" data-view="budgets">Budgets</button>
+              <button class="zb-nav-item" data-view="transactionLocking">Transaction Locking</button>
+              <button class="zb-nav-item" data-view="currencyAdjustments">Currency Adjustments</button>
+            </div>
+
+            <button class="zb-nav-item" data-view="reports">
+              <span class="ico">📊</span><span>Reports</span>
+            </button>
+            <button class="zb-nav-item" data-view="documents">
+              <span class="ico">📄</span><span>Documents</span>
+            </button>
+          </nav>
+          <div class="zb-sidebar-foot">
+            <span class="zb-save-dot"></span> Local save on
+          </div>
+        </aside>
+
+        <main class="zb-main">
+          <div class="zb-page-head">
+            <div>
+              <h1 id="page-title">Home</h1>
+              <div class="zb-tabs" id="home-tabs" hidden>
+                <button class="zb-tab active" data-home-tab="dashboard">Dashboard</button>
+                <button class="zb-tab" data-home-tab="getting-started">Getting Started</button>
+                <button class="zb-tab" data-home-tab="recent">Recent Updates</button>
+                <button class="zb-tab" data-home-tab="announcements">Announcements</button>
+              </div>
+            </div>
+            <div class="zb-page-actions" id="page-actions"></div>
+          </div>
+          <div class="zb-content" id="content"></div>
+        </main>
       </div>
     </div>
 
-    <div class="modal-backdrop" id="modal-backdrop" hidden>
-      <div class="modal" id="modal" role="dialog" aria-modal="true">
-        <div class="modal-head">
-          <h2 id="modal-title">Dialog</h2>
-          <button class="icon-btn" id="modal-close" aria-label="Close">×</button>
-        </div>
-        <div class="modal-body" id="modal-body"></div>
-        <div class="modal-foot" id="modal-foot"></div>
+    <!-- Quick create menu -->
+    <div class="zb-dropdown" id="quick-menu" hidden>
+      <div class="zb-dd-col">
+        <div class="zb-dd-h">Sales</div>
+        <button data-qc="invoices">Invoice</button>
+        <button data-qc="quotes">Quote</button>
+        <button data-qc="salesOrders">Sales Order</button>
+        <button data-qc="customers">Customer</button>
+        <button data-qc="paymentsReceived">Customer Payment</button>
+        <button data-qc="creditNotes">Credit Note</button>
+      </div>
+      <div class="zb-dd-col">
+        <div class="zb-dd-h">Purchases</div>
+        <button data-qc="expenses">Expense</button>
+        <button data-qc="bills">Bill</button>
+        <button data-qc="purchaseOrders">Purchase Order</button>
+        <button data-qc="vendors">Vendor</button>
+        <button data-qc="paymentsMade">Vendor Payment</button>
+      </div>
+      <div class="zb-dd-col">
+        <div class="zb-dd-h">Other</div>
+        <button data-qc="items">Item</button>
+        <button data-qc="bankAccounts">Bank Account</button>
+        <button data-qc="projects">Project</button>
+        <button data-qc="journals">Journal</button>
       </div>
     </div>
 
-    <div class="toast" id="toast" hidden></div>
+    <div class="zb-modal-bg" id="modal-bg" hidden>
+      <div class="zb-modal" id="modal" role="dialog" aria-modal="true">
+        <div class="zb-modal-head">
+          <h2 id="modal-title">New</h2>
+          <button class="zb-icon-btn" id="modal-close">×</button>
+        </div>
+        <div class="zb-modal-body" id="modal-body"></div>
+        <div class="zb-modal-foot" id="modal-foot"></div>
+      </div>
+    </div>
 
+    <div class="zb-toast" id="toast" hidden></div>
     <script src="/js/app.js"></script>
   </body>
 </html>

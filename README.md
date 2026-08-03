@@ -1,16 +1,23 @@
-# ZuhoBooks
+# Zuho Books
 
-A local Zoho Books–style accounting website. Run it on your machine; every contact, invoice, expense, bill, and setting is saved to a JSON file on disk.
+A local replica of Zoho Books. Same top bar, left sidebar modules, and dashboard layout — with all data saved to a JSON file on disk.
 
 ## Features
 
-- **Dashboard** — receivables, payables, cash-flow bars, top expenses, recent invoices
-- **Invoices** — create/edit/delete with line items and status (draft, sent, paid, overdue, void)
-- **Expenses** — categorize spending and link vendors
-- **Bills** — track vendor payables
-- **Contacts** — customers and vendors
-- **Reports** — profit & loss by date range
-- **Settings** — organization profile (name, currency, address)
+Matches Zoho Books navigation and screens:
+
+- **Home** — Dashboard, Getting Started, Recent Updates, Announcements
+- **Items**
+- **Banking** — accounts and transactions
+- **Sales** — Customers, Quotes, Retainer Invoices, Sales Orders, Invoices, Payment Links, Payments Received, Recurring Invoices, Credit Notes
+- **Purchases** — Vendors, Expenses, Recurring Expenses, Purchase Orders, Bills, Recurring Bills, Payments Made, Vendor Credits
+- **Time Tracking** — Projects, Timesheet
+- **Accountant** — Manual Journals, Bulk Update, Chart of Accounts, Budgets, Transaction Locking, Currency Adjustments
+- **Reports** — Profit & Loss
+- **Documents**
+- **Settings** — organization profile
+
+Every create/edit/delete persists to `data/db.json`.
 
 ## Quick start
 
