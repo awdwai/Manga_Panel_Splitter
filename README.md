@@ -14,6 +14,10 @@ A local Zoho Books–style accounting website. Run it on your machine; every con
 
 ## Quick start
 
+**Windows:** double-click `run.bat` (or run `.\run.ps1` in PowerShell).
+
+**Any platform:**
+
 ```bash
 npm install
 npm start
